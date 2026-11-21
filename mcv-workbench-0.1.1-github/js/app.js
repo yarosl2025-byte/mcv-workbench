@@ -2,7 +2,7 @@ import * as db from './store.js';
 import * as CLO from './clo.js';
 import * as T from './tanks.js';
 
-const VERSION = '0.2.2';
+const VERSION = '0.3.0';
 const CATS = ['Док', 'PMS', 'ABS', 'Заказы', 'Офис', 'Текущие', 'IT', 'Logbook', 'Отчёты', 'Почта'];
 const ST = { inbox: 'Входящие', todo: 'Нужно сделать', doing: 'В работе', wait: 'Ждём', done: 'Готово' };
 const SLOTS = { '': 'Без времени', am: 'Утро', noon: 'До обеда', pm: 'После обеда', eve: 'Вечер' };
@@ -10,11 +10,11 @@ const REP = { '': 'Нет', daily: 'Каждый день', weekly: 'Кажду�
 const DOW = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MON = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 const MON1 = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-const VIEWS = ['today', 'plan', 'alerts', 'tanks', 'lube', 'bwm', 'sync', 'more'];
+const VIEWS = ['today', 'plan', 'alerts', 'tanks', 'lube', 'log', 'bwm', 'sync', 'more'];
 
 const S = { tasks: new Map(), sources: [], feed: [], settings: {}, loaded: false,
   view: 'today', mode: 'week', off: 0, sel: null, cat: '', q: '', hideDone: true, mOff: 0, rolled: false, edit: null, undo: null,
-  lubeTab: 'clo', install: null, tankTab: 'daily', sDate: null, sDraft: null, tmOff: 0, tmUnit: 'cm', robDraft: null };
+  lubeTab: 'clo', install: null, tankTab: 'daily', sDate: null, sDraft: null, tmOff: 0, tmUnit: 'cm', robDraft: null, logTab: 'scrape', scDraft: null, lgQ: '', lgCode: '', lgYear: null, lgMore: 100 };
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -403,15 +403,77 @@ function orderView() {
 }
 function num0(p) { const c = JSON.parse(JSON.stringify(p)); for (const g of ['additive', 'meso', 'tpeo', 'mdcl2']) for (const k in c[g]) if (k !== 'product' && c[g][k] !== '') c[g][k] = +c[g][k]; return c }
 
+
+/* ---------- Logbook: scrape-down, ORB Part I, Biofouling ---------- */
+const ORB_CODES = { 'C.11': 'C11 Сбор шлама', 'C.12': 'C12 Перекачка/сдача шлама', D: 'D Льяльные воды', H: 'H Бункеровка', I: 'I Прочее, инвентаризация', F: 'F Фильтрующее оборудование' };
+const CYL_COL = ['#5BB8F5', '#3FB68B', '#F2A93B', '#F0616D', '#B49CF5', '#4FD1C5'];
+function vLog() {
+  const tabs = [['scrape', 'Scrape-down ГД'], ['orb', 'ORB Part I'], ['bio', 'Biofouling']];
+  const body = S.logTab === 'orb' ? logBook('orb') : S.logTab === 'bio' ? logBook('bio') : scrapeView();
+  return `<div><h1>Logbook</h1><div class="sub">Scrape-down главного двигателя, Oil Record Book Part I, Biofouling Management Log</div></div>
+  <div class="tabs" role="tablist">${tabs.map(([k, v]) => `<button role="tab" data-act="lgtab" data-t="${k}" aria-selected="${S.logTab === k}">${v}</button>`).join('')}</div>${body}`;
+}
+const avg = a => { const v = a.filter(x => x != null && x !== ''); return v.length ? v.reduce((s, x) => s + +x, 0) / v.length : null };
+function scrapeView() {
+  const rows = db.all('scrape').sort((a, b) => b.id.localeCompare(a.id)), lim = db.get('meta/scrapelimits') || {};
+  const D = S.scDraft || (S.scDraft = { date: today(), time: new Date().toTimeString().slice(0, 5), rh: rows[0] && rows[0].rh ? '' : '', fe: ['', '', '', '', '', ''], bn: ['', '', '', '', '', ''], remarks: '' });
+  const feMax = +lim.feMax || null, bnMin = +lim.bnMin || null;
+  const cell = (v, bad) => `<td class="${bad ? 'bad' : ''}">${v == null || v === '' ? '' : num(v, v % 1 ? 1 : 0)}</td>`;
+  return `<section class="card"><h2>Новый замер</h2><div class="note">Незамеренный цилиндр оставь пустым (не 0). Запись с той же датой и временем заменяет прежнюю.</div>
+   <div class="fg3 mt"><label class="f">Дата<input type="date" data-sc="date" value="${esc(D.date)}"></label><label class="f">Время<input type="time" data-sc="time" value="${esc(D.time)}"></label><label class="f">Наработка ГД, ч<input inputmode="numeric" type="number" data-sc="rh" value="${esc(D.rh)}" placeholder="${rows[0] && rows[0].rh ? 'было ' + rows[0].rh : ''}"></label></div>
+   <div class="cylin mt"><span class="lbl">Fe, ppm</span>${[0, 1, 2, 3, 4, 5].map(i => `<label><small>Цил. ${i + 1}</small><input inputmode="decimal" type="number" step="any" data-sc="fe" data-i="${i}" value="${esc(D.fe[i])}"></label>`).join('')}</div>
+   <div class="cylin"><span class="lbl">BN, mg KOH/g</span>${[0, 1, 2, 3, 4, 5].map(i => `<label><small>Цил. ${i + 1}</small><input inputmode="decimal" type="number" step="any" data-sc="bn" data-i="${i}" value="${esc(D.bn[i])}"></label>`).join('')}</div>
+   <label class="f mt">Замечания<input data-sc="remarks" value="${esc(D.remarks)}"></label>
+   <div class="row mt" style="justify-content:flex-end"><button class="btn pri" data-act="scsave">Сохранить замер</button></div></section>
+  ${rows.length ? `<section class="card"><div class="row between"><h2>Тренд Fe по цилиндрам</h2><span class="sub">${feMax ? 'предел Fe ' + feMax + ' ppm' : 'предел Fe не задан'}${bnMin ? ' · BN мин. ' + bnMin : ''}</span></div>${scrapeChart(rows.slice(0, 40).reverse(), feMax)}
+   <div class="legend">${CYL_COL.map((c, i) => `<span><i style="background:${c}"></i>Цил. ${i + 1}</span>`).join('')}<span><i style="background:var(--ink)"></i>Среднее</span></div></section>` : ''}
+  <section class="card"><h2>Журнал</h2><div class="scroll mt"><table class="mtab sc"><thead><tr><th class="stick">Дата</th><th>Наработка</th>${[1, 2, 3, 4, 5, 6].map(i => `<th>Fe ${i}</th>`).join('')}<th>Fe ср.</th><th>Fe макс.</th>${[1, 2, 3, 4, 5, 6].map(i => `<th>BN ${i}</th>`).join('')}<th>BN ср.</th><th>Замечания</th></tr></thead><tbody>
+   ${rows.map(r => { const fa = avg(r.fe), fm = Math.max(...r.fe.filter(x => x != null && x !== '').map(Number)), ba = avg(r.bn);
+     return `<tr class="click" data-act="scopen" data-rid="${esc(r.id)}"><th class="stick">${dlong(r.date)} ${esc(r.time || '')}</th><td>${r.rh ?? ''}</td>${r.fe.map(v => cell(v, feMax && v > feMax)).join('')}${cell(fa)}${cell(isFinite(fm) ? fm : null, feMax && fm > feMax)}${r.bn.map(v => cell(v, bnMin && v != null && v !== '' && v < bnMin)).join('')}${cell(ba)}<td style="text-align:left">${esc(r.remarks || '')}</td></tr>` }).join('') || '<tr><td colspan="20" class="empty">Замеров пока нет</td></tr>'}
+   </tbody></table></div></section>
+  <section class="card"><h2>Пределы для подсветки</h2><div class="note">В Excel ячейки пределов были пустыми. Впиши значения по мануалу MAN или рекомендации лаборатории — превышения подсветятся красным.</div>
+   <form id="limf" class="fg mt"><label class="f">Fe, макс. ppm<input inputmode="decimal" type="number" step="any" name="feMax" value="${esc(lim.feMax ?? '')}"></label><label class="f">BN, мин. mg KOH/g<input inputmode="decimal" type="number" step="any" name="bnMin" value="${esc(lim.bnMin ?? '')}"></label>
+   <div class="f" style="justify-content:flex-end"><button class="btn">Сохранить пределы</button></div></form></section>`;
+}
+function scrapeChart(rows, feMax) {
+  const W = 640, H = 220, P = 38, n = rows.length, vals = rows.flatMap(r => r.fe).filter(v => v != null && v !== '').map(Number);
+  const mx = Math.max(feMax || 0, ...vals, 10) * 1.1, x = i => P + (n < 2 ? 0 : i / (n - 1) * (W - P - 12)), y = v => H - 26 - v / mx * (H - 44);
+  const line = (get, col, w) => { let d = '', pen = false; rows.forEach((r, i) => { const v = get(r); if (v == null || v === '' || isNaN(v)) { pen = false; return } d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(+v).toFixed(1); pen = true }); return `<path d="${d}" fill="none" stroke="${col}" stroke-width="${w}" stroke-linejoin="round"/>` };
+  const ticks = [0, 25, 50, 75, 100, 125, 150, 200].filter(t => t < mx);
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Тренд Fe по цилиндрам">
+   ${ticks.map(t => `<line x1="${P}" x2="${W - 10}" y1="${y(t)}" y2="${y(t)}" class="gl"/><text x="${P - 6}" y="${y(t) + 4}" text-anchor="end">${t}</text>`).join('')}
+   ${feMax ? `<line x1="${P}" x2="${W - 10}" y1="${y(feMax)}" y2="${y(feMax)}" stroke="var(--red)" stroke-dasharray="5 4"/>` : ''}
+   ${rows.map((r, i) => i % Math.ceil(n / 8 || 1) === 0 ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${parse(r.date).getDate()}.${String(parse(r.date).getMonth() + 1).padStart(2, '0')}</text>` : '').join('')}
+   ${CYL_COL.map((c, k) => line(r => r.fe[k], c, 1.6)).join('')}${line(r => avg(r.fe), 'var(--ink)', 3)}</svg>`;
+}
+function logBook(kind) {
+  const docs = db.all('logbook').filter(d => d.book === (kind === 'orb' ? 'ORB1' : 'BIO')), all = docs.flatMap(d => d.entries).sort((a, b) => b.date.localeCompare(a.date));
+  if (!all.length) return `<div class="banner">Записей пока нет. «Синхронизация» → «Загрузить копию» → файл данных Logbook.</div>`;
+  const q = (S.lgQ || '').toLowerCase(), code = kind === 'orb' ? S.lgCode : '';
+  const years = [...new Set(all.map(e => e.date.slice(0, 4)))].sort().reverse(), yr = S.lgYear === null ? (q ? '' : years[0]) : S.lgYear;
+  const list = all.filter(e => (!code || e.code === code) && (!yr || e.date.startsWith(yr)) && (!q || (e.title + ' ' + e.details + ' ' + (e.remarks || '') + ' ' + e.author).toLowerCase().includes(q)));
+  const last = all[0].date, cnt = c => all.filter(e => e.code === c && (!yr || e.date.startsWith(yr))).length;
+  const shown = list.slice(0, S.lgMore || 100);
+  return `<section class="card"><div class="row between"><div><h2>${kind === 'orb' ? 'Oil Record Book Part I' : 'Biofouling Management Log Book'}</h2><div class="note">${all.length} записей · последняя ${dlong(last.slice(0, 10))} · выгрузка из e-log. Официальные записи делаются в e-log; сюда они попадают новой выгрузкой.</div></div></div>
+   <div class="row mt"><input class="search" id="lgq" type="search" placeholder="Поиск: танк, порт, количество…" value="${esc(S.lgQ || '')}" aria-label="Поиск по журналу">
+   <select class="search" style="width:auto" data-act="lgyear" id="lgyear"><option value="">Все годы</option>${years.map(y => `<option${y === yr ? ' selected' : ''}>${y}</option>`).join('')}</select></div>
+   ${kind === 'orb' ? `<div class="chips mt"><button class="chip" data-act="lgcode" data-c="" aria-pressed="${!code}">Все</button>${Object.entries(ORB_CODES).map(([c, l]) => `<button class="chip" data-act="lgcode" data-c="${c}" aria-pressed="${code === c}">${l} · ${cnt(c)}</button>`).join('')}</div>` : ''}</section>
+  <div class="note">Найдено: ${list.length}${list.length > shown.length ? ', показаны первые ' + shown.length : ''}</div>
+  <div class="list">${shown.map(e => `<div class="lg${e.warnings ? ' warnrow' : ''}"><div class="row between"><b>${e.date.slice(8, 10)}.${e.date.slice(5, 7)}.${e.date.slice(0, 4)} ${e.date.slice(11, 16)} · <span class="tag">${esc(e.code)}</span> ${esc(e.title.replace(/^[A-Z.0-9]+:\s*/, '').replace(/^\d\.\d\s*-\s*/, ''))}</b>${e.ok ? '' : '<span class="tag warn">не утверждена</span>'}</div>
+    <div class="ld">${esc(e.details)}</div>${e.remarks ? `<div class="small">Замечание: ${esc(e.remarks)}</div>` : ''}${e.warnings ? `<div class="small bad">e-log: ${esc(e.warnings)}</div>` : ''}<div class="small">${esc(e.author || '')}${e.att ? ' · вложений: ' + e.att : ''}</div></div>`).join('') || '<div class="empty">Ничего не найдено</div>'}</div>
+  ${list.length > shown.length ? `<button class="btn" data-act="lgmore">Показать ещё</button>` : ''}`;
+}
+
 /* ---------- Ещё (телефон) ---------- */
 function vMore() {
   const c = counts(), n = c.over + c.inbox + c.stale;
   const it = (href, title, sub, badge) => `<a class="t" href="${href}"><div class="tb"><span class="tt">${title}</span><span class="small">${sub}</span></div>${badge ? `<span class="tag warn">${badge}</span>` : ''}</a>`;
   return `<div><h1>Ещё</h1><div class="sub">Остальные разделы</div></div><div class="list">
+   ${it('#log', 'Logbook', 'Scrape-down ГД · ORB Part I · Biofouling')}
    ${it('#alerts', 'Уведомления', 'Просрочки, входящие, устаревшие источники', n || '')}
    ${it('#bwm', 'Bearing monitoring', 'Kongsberg BWM · месячные отчёты')}
    ${it('#sync', 'Синхронизация', 'Облако, резервная копия, источники, настройки')}</div>
-   <section class="card"><h2>Скоро</h2><div class="note mt">Заказы и заявки · Запчасти · Док 2026 и ABS · Logbook и scrape-down · StarConnect · ACONIS · ME performance · Handover · Отчёты · Почта</div></section>`;
+   <section class="card"><h2>Скоро</h2><div class="note mt">Заказы и заявки · Запчасти · Док 2026 и ABS · StarConnect · ACONIS · ME performance · Handover · Отчёты · Почта</div></section>`;
 }
 
 /* ---------- editor ---------- */
@@ -456,8 +518,8 @@ function mic(btn) {
 /* ---------- render ---------- */
 function render() {
   const m = $('#main'); const keep = focusSel(document.activeElement);
-  m.innerHTML = { plan: vPlan, alerts: vAlerts, tanks: vTanks, lube: vLube, bwm: vBwm, sync: vSync, more: vMore }[S.view]?.() ?? vToday();
-  document.querySelectorAll('[data-v]').forEach(a => a.setAttribute('aria-current', a.dataset.v === S.view || (a.hasAttribute('data-more') && ['alerts', 'bwm', 'sync'].includes(S.view)) ? 'page' : 'false'));
+  m.innerHTML = { plan: vPlan, alerts: vAlerts, tanks: vTanks, lube: vLube, log: vLog, bwm: vBwm, sync: vSync, more: vMore }[S.view]?.() ?? vToday();
+  document.querySelectorAll('[data-v]').forEach(a => a.setAttribute('aria-current', a.dataset.v === S.view || (a.hasAttribute('data-more') && ['alerts', 'bwm', 'sync', 'log'].includes(S.view)) ? 'page' : 'false'));
   const c = counts(), n = c.over + c.inbox + c.stale; document.querySelectorAll('[data-cnt]').forEach(x => { x.hidden = !n; x.textContent = n });
   const st = db.status; $('#sfoot').textContent = { local: 'На устройстве', idle: 'Синхронизировано', syncing: 'Синхронизация…', offline: 'Офлайн', error: 'Ошибка синхронизации' }[st.state];
   $('#sdot').style.background = { local: 'var(--mute)', idle: 'var(--green)', syncing: 'var(--blue)', offline: 'var(--acc)', error: 'var(--red)' }[st.state];
@@ -472,6 +534,7 @@ function focusSel(ae) {
   if (d.snd) return `[data-snd="${q(d.snd)}"]`;
   if (d.rob) return `[data-rob="${q(d.rob)}"][data-f="${q(d.f)}"]`;
   if (d.lo) return `[data-lo="${q(d.lo)}"]`;
+  if (d.sc) return d.i != null ? `[data-sc="${q(d.sc)}"][data-i="${q(d.i)}"]` : `[data-sc="${q(d.sc)}"]`;
   if (d.clo !== undefined) return `[data-clo][name="${q(ae.name)}"]`;
   const f = ae.form; if (f && f.id && ae.name) return `#${q(f.id)} [name="${q(ae.name)}"]`;
   return null;
@@ -501,6 +564,17 @@ document.addEventListener('click', e => {
   if (a === 'mic' && SR) mic(el);
   if (a === 'ltab') { S.lubeTab = el.dataset.t; render() }
   if (a === 'ttab') { S.tankTab = el.dataset.t; render() }
+  if (a === 'lgtab') { S.logTab = el.dataset.t; S.lgMore = 100; S.lgQ = ''; S.lgYear = null; render() }
+  if (a === 'lgcode') { S.lgCode = el.dataset.c; S.lgMore = 100; render() }
+  if (a === 'lgmore') { S.lgMore += 200; render() }
+  if (a === 'scsave') { const D = S.scDraft, n = v => v === '' || v == null ? null : +v;
+    if (!D.date) { toast('Укажи дату'); return } const fe = D.fe.map(n), bn = D.bn.map(n);
+    if (fe.every(v => v == null) && bn.every(v => v == null)) { toast('Нет ни одного значения Fe или BN'); return }
+    const id = D.date + 'T' + (D.time || '').replace(':', ''), old = db.get('scrape/' + id);
+    put('scrape/' + id, { date: D.date, time: D.time, rh: n(D.rh), fe, bn, remarks: D.remarks, by: 'Ярослав' }).then(() => { S.scDraft = null; render(); toast(old ? 'Замер ' + dlong(D.date) + ' ' + D.time + ' заменён' : 'Замер сохранён') });
+    const lim = db.get('meta/scrapelimits') || {}, hi = lim.feMax ? fe.map((v, i) => v > lim.feMax ? 'цил. ' + (i + 1) + ' Fe ' + v : '').filter(Boolean) : [];
+    feed('Scrape-down ' + dlong(D.date) + ': Fe ср. ' + num(avg(fe), 0) + ' ppm' + (hi.length ? ' · выше предела: ' + hi.join(', ') : '')) }
+  if (a === 'scopen') { const r = db.get('scrape/' + el.dataset.rid); if (r) { S.scDraft = { date: r.date, time: r.time || '', rh: r.rh ?? '', fe: r.fe.map(v => v ?? ''), bn: r.bn.map(v => v ?? ''), remarks: r.remarks || '' }; render(); scrollTo(0, 0); toast('Замер открыт для правки') } }
   if (a === 'sday') { S.sDate = add(S.sDate || today(), +el.dataset.d); render() }
   if (a === 'tday') { S.sDate = el.dataset.d; S.tankTab = 'daily'; render(); scrollTo(0, 0) }
   if (a === 'tmo') { S.tmOff += +el.dataset.d; render() }
@@ -527,6 +601,8 @@ addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden
 document.addEventListener('input', e => {
   if (e.target.id === 'q') { S.q = e.target.value; clearTimeout(S.qt); S.qt = setTimeout(render, 200) }
   const ds = e.target.dataset || {};
+  if (ds.sc) { const D = S.scDraft; if (ds.i != null) D[ds.sc][+ds.i] = e.target.value; else D[ds.sc] = e.target.value }
+  if (e.target.id === 'lgq') { S.lgQ = e.target.value; S.lgMore = 100; clearTimeout(S.qt); S.qt = setTimeout(render, 250) }
   if (ds.snd) { S.sDraft[ds.snd] = e.target.value; clearTimeout(S.st); S.st = setTimeout(render, 350) }
   if (ds.rob) { const I = robInputs(); (I.tanks[ds.rob] ||= {})[ds.f] = e.target.value; clearTimeout(S.st); S.st = setTimeout(render, 400) }
   if (e.target.form && e.target.form.id === 'robh') { robInputs()[e.target.name] = e.target.value; clearTimeout(S.st); S.st = setTimeout(render, 400) }
@@ -534,6 +610,7 @@ document.addEventListener('input', e => {
   if (e.target.dataset.clo !== undefined) { const p = cloState(); p[e.target.name] = e.target.value; clearTimeout(S.ct); S.ct = setTimeout(() => { put('meta/clo', p).then(render) }, 250) }
 });
 document.addEventListener('change', e => {
+  if (e.target.id === 'lgyear') { S.lgYear = e.target.value; S.lgMore = 100; render() }
   if (e.target.id === 'sdate' && e.target.value) { S.sDate = e.target.value; render() }
   if (e.target.id === 'impf' && e.target.files[0]) { e.target.files[0].text().then(t => db.importAll(JSON.parse(t))).then(n => { toast('Загружено записей: ' + n) }).catch(x => toast(x.message)) }
 });
@@ -545,6 +622,7 @@ document.addEventListener('submit', e => {
     const nw = S.edit.isNew; closeEd(); saveTask(t, nw ? 'Задача добавлена' : 'Сохранено', prev); if (nw) feed('Новая задача: ' + t.title) }
   if (id === 'rowf' && S.edit) { const body = {}; for (const [k, v] of f.entries()) if (String(v).trim() !== '') body[k] = String(v).trim();
     const p = S.edit.col + '/' + S.edit.rid; body.updatedBy = 'Ярослав'; closeEd(); put(p, body).then(() => { render(); toast('Сохранено') }) }
+  if (id === 'limf') { const l = {}; for (const [k, v] of f.entries()) if (v !== '') l[k] = +v; put('meta/scrapelimits', l).then(render); toast('Пределы сохранены') }
   if (id === 'setf') { const s = { ...S.settings }; for (const [k, v] of f.entries()) s[k] = k === 'dayLimit' ? Number(v) || 8 : String(v); S.settings = s; put('meta/settings', s).then(render); toast('Настройки сохранены') }
   if (id === 'remf') { const cfg = Object.fromEntries(f.entries()); if ((cfg.space || '').trim().length < 24) { toast('Код пространства — минимум 24 символа. Нажми «Создать код»'); return } toast('Подключаю…'); db.setRemote(cfg).then(r => { render(); toast(r && r.pulled !== undefined ? 'Подключено: получено ' + r.pulled + ', отправлено ' + r.pushed : 'Сохранено') }).catch(x => { render(); toast(x.message) }) }
   if (id === 'edf' || id === 'rowf') return;

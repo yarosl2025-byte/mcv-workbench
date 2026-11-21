@@ -181,3 +181,12 @@ table.rob td,table.rob th{vertical-align:middle;padding:6px 8px}
  .savebar{bottom:80px}
  table.rob input{width:72px}
 }
+/* ---- logbook ---- */
+.cylin{display:grid;grid-template-columns:110px repeat(6,minmax(0,1fr));gap:8px;align-items:end;margin-top:8px}
+.cylin label{display:flex;flex-direction:column;gap:3px}.cylin small{font-size:11px;color:var(--mute)}
+.cylin input{min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--p2);padding:0 8px;font-size:17px;text-align:center;width:100%}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--mute);margin-top:6px}.legend i{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.lg{background:var(--p1);border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;font-size:13px}
+.lg b{font-weight:600;font-size:13px}.lg .ld{color:#C9D3DD;overflow-wrap:anywhere}.lg.warnrow{border-color:#4A3A1A}
+.mtab.sc td{min-width:44px}
+@media(max-width:760px){.cylin{grid-template-columns:repeat(3,minmax(0,1fr))}.cylin .lbl{grid-column:1/-1}}
