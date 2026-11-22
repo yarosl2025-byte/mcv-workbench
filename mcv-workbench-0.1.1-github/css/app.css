@@ -190,3 +190,9 @@ table.rob td,table.rob th{vertical-align:middle;padding:6px 8px}
 .lg b{font-weight:600;font-size:13px}.lg .ld{color:#C9D3DD;overflow-wrap:anywhere}.lg.warnrow{border-color:#4A3A1A}
 .mtab.sc td{min-width:44px}
 @media(max-width:760px){.cylin{grid-template-columns:repeat(3,minmax(0,1fr))}.cylin .lbl{grid-column:1/-1}}
+/* ---- 0.4 ---- */
+.warnc{color:var(--acc)}td.warnc b{color:var(--acc)}td.bad b{color:var(--red)}
+table.rh td,table.rh th{white-space:nowrap}
+.side{overflow-y:auto}
+.rhf{display:grid;grid-template-columns:240px 1fr auto;gap:14px;align-items:end}
+@media(max-width:760px){.rhf{grid-template-columns:minmax(0,1fr)}}

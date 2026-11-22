@@ -66,7 +66,14 @@ export function exportAll() { return { app: 'mcv-workbench', exported: now(), do
 export async function importAll(json) {
   const docs = json && json.docs; if (!Array.isArray(docs)) throw new Error('Это не файл резервной копии MCV Workbench');
   let n = 0;
-  for (const r of docs) { const cur = mem.get(r.path); if (!cur || r.updated > cur.updated) { await writeRec({ ...r, dirty: 1 }); n++ } }
+  for (const r of docs) {
+    const cur = mem.get(r.path);
+    if (r.patch) { // merge selected fields into an existing document (keeps the user's own edits to other fields)
+      if (!cur || cur.deleted) continue;
+      await writeRec({ path: r.path, body: { ...cur.body, ...r.body }, updated: r.updated > cur.updated ? r.updated : new Date().toISOString(), deleted: false, dirty: 1 }); n++; continue;
+    }
+    if (!cur || r.updated > cur.updated) { await writeRec({ ...r, dirty: 1 }); n++ }
+  }
   countPending(); emit(docs.map(d => d.path)); schedule(500); return n;
 }
 

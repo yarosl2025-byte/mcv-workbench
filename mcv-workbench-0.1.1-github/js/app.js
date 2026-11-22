@@ -1,8 +1,9 @@
 import * as db from './store.js';
 import * as CLO from './clo.js';
 import * as T from './tanks.js';
+import * as RR from './rhrs.js';
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const CATS = ['Док', 'PMS', 'ABS', 'Заказы', 'Офис', 'Текущие', 'IT', 'Logbook', 'Отчёты', 'Почта'];
 const ST = { inbox: 'Входящие', todo: 'Нужно сделать', doing: 'В работе', wait: 'Ждём', done: 'Готово' };
 const SLOTS = { '': 'Без времени', am: 'Утро', noon: 'До обеда', pm: 'После обеда', eve: 'Вечер' };
@@ -10,11 +11,11 @@ const REP = { '': 'Нет', daily: 'Каждый день', weekly: 'Кажду�
 const DOW = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MON = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 const MON1 = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-const VIEWS = ['today', 'plan', 'alerts', 'tanks', 'lube', 'log', 'bwm', 'sync', 'more'];
+const VIEWS = ['today', 'plan', 'alerts', 'pms', 'rhrs', 'perf', 'tanks', 'lube', 'reefer', 'log', 'bwm', 'sync', 'more'];
 
 const S = { tasks: new Map(), sources: [], feed: [], settings: {}, loaded: false,
   view: 'today', mode: 'week', off: 0, sel: null, cat: '', q: '', hideDone: true, mOff: 0, rolled: false, edit: null, undo: null,
-  lubeTab: 'clo', install: null, tankTab: 'daily', sDate: null, sDraft: null, tmOff: 0, tmUnit: 'cm', robDraft: null, logTab: 'scrape', scDraft: null, lgQ: '', lgCode: '', lgYear: null, lgMore: 100 };
+  lubeTab: 'clo', install: null, tankTab: 'daily', sDate: null, sDraft: null, tmOff: 0, tmUnit: 'cm', robDraft: null, logTab: 'scrape', scDraft: null, lgQ: '', lgCode: '', lgYear: null, lgMore: 100, pmDs: '', pmQ: '', pmResp: 'eng', pmFree: false, pmMore: 80, pfG: 'exh', bwM: 'dev', bwFrom: '', bwDay: '' };
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -83,7 +84,7 @@ function card(t, opt = {}) {
   <span class="tag ${esc(t.cat)}">${esc(t.cat)}</span>${t.prio == 1 ? '<span class="tag p1">P1</span>' : ''}
   ${o ? `<span class="tag warn">просрочено ${diff(today(), t.due)} дн.</span>` : soon ? `<span class="tag warn">срок ${dlong(t.due)}</span>` : t.due && opt.showDue ? `<span class="small">срок ${dlong(t.due)}</span>` : ''}
   ${t.moved >= 2 ? `<span class="small">перенесено ×${t.moved}</span>` : ''}${t.status === 'wait' ? `<span class="small">ждём${t.waiting ? ': ' + esc(t.waiting) : ''}</span>` : ''}
-  ${t.repeat ? `<span class="small">повтор</span>` : ''}${opt.day && t.day ? `<span class="small">${dshort(t.day)}</span>` : ''}</span></div></div>`;
+  ${t.repeat ? `<span class="small">повтор</span>` : ''}${t.pmsClosed && t.status !== 'done' ? '<span class="tag" style="color:var(--blue)">нет в PMS — закрыта?</span>' : t.pms && t.pms.some(p => p.ds === 'Overdue') ? '<span class="tag warn">PMS просрочена</span>' : ''}${opt.day && t.day ? `<span class="small">${dshort(t.day)}</span>` : ''}</span></div></div>`;
 }
 const listOf = (arr, opt) => arr.length ? arr.map(t => card(t, opt)).join('') : '<div class="empty">Пусто</div>';
 const byPrio = (a, b) => (a.prio || 3) - (b.prio || 3) || (a.due || '9').localeCompare(b.due || '9');
@@ -166,6 +167,7 @@ function vAlerts() {
   ${sec('Просрочено', listOf(ov, {}), ov.length, 'var(--red)')}
   ${sec('Срок в ближайшие 2 дня', listOf(soon, { day: true }), soon.length)}
   ${sec('Источники устарели', st.map(s => `<a class="t" href="#sync"><div class="tb"><span class="tt">${esc(s.name)}</span><span class="small">обновлён ${s.last ? dlong(s.last) : '—'} · ${esc(s.how || '')}</span></div></a>`).join('') || '<div class="empty">Все источники свежие</div>', st.length, 'var(--acc)')}
+  ${(() => { const cl = L.filter(t => t.pmsClosed && t.status !== 'done'); return cl.length ? sec('Нет в PMS Workboard — вероятно, уже закрыты', listOf(cl, { day: true }), cl.length, 'var(--blue)') : '' })()}
   ${mv.length ? sec('Переносится уже 3 раза и больше', listOf(mv, { day: true }), mv.length) : ''}`;
 }
 
@@ -266,17 +268,6 @@ function openRow(col, rid) {
     : `<label class="f">${l}<input name="${k}" type="${t === 'number' ? 'number' : t || 'text'}" ${t === 'number' ? 'step="any" inputmode="decimal"' : ''} value="${esc(r[k] ?? (t === 'date' && !rid ? today() : ''))}"></label>`).join('')}</div>
   <div class="row between"><div>${rid ? '<button type="button" class="btn danger" data-act="rowdel">Удалить</button>' : ''}</div><div class="row"><button type="button" class="btn" data-act="close">Отмена</button><button class="btn pri">Сохранить</button></div></div></form>`;
   $('#modal').hidden = false;
-}
-
-/* ---------- Bearing Wear Monitoring ---------- */
-function vBwm() {
-  const reps = db.all('bwm').sort((a, b) => (b.month || '').localeCompare(a.month || ''));
-  const cyl = [1, 2, 3, 4, 5, 6], last = reps[0];
-  return `<div><h1>Bearing Wear Monitoring</h1><div class="sub">Kongsberg BWM · износ подшипников главного двигателя ${esc((db.get('cal/clo-vessel') || {}).engine || '')}</div></div>
-  <section class="card"><div class="row between"><div><h2>Последний отчёт</h2><div class="note">${last ? esc(last.title || last.month) : 'Отчётов пока нет'}</div></div>${last && last.status ? `<span class="tag ${last.status === 'ok' ? '' : 'warn'}">${last.status === 'ok' ? 'в норме' : 'есть отклонения'}</span>` : ''}</div>
-  <div class="cyl mt">${cyl.map(c => { const v = last && last.cyl && last.cyl[c]; return `<div class="cy${v && v.flag ? ' bad' : ''}"><span class="lbl">Цил. ${c}</span><b>${v ? esc(v.value) : '—'}</b><span class="lbl">${v ? esc(v.note || '') : 'нет данных'}</span></div>` }).join('')}</div></section>
-  <section class="card"><h2>Тренд по месяцам</h2>${reps.length >= 2 ? '<div class="note mt">Тренд построится по загруженным отчётам.</div>' : '<div class="empty">Появится, когда будет хотя бы два месячных отчёта.</div>'}</section>
-  <section class="card"><h2>Месячные отчёты</h2><div class="list mt">${reps.map(r => `<div class="t"><div class="tb"><span class="tt">${esc(r.title || r.month)}</span><span class="small">${esc(r.summary || '')}</span></div></div>`).join('') || `<div class="empty">Скинь мне месячный отчёт из Kongsberg BWM (PDF, Excel или фото экрана). Я разберу его и добавлю сюда значения по цилиндрам, отклонения и тренд, а также сделаю интерактивный файл отчёта.</div>`}</div></section>`;
 }
 
 /* ---------- Синхронизация ---------- */
@@ -386,7 +377,7 @@ function download(blob, name) { const u = URL.createObjectURL(blob), l = documen
 /* ---------- Заказ масла (MLFMT) ---------- */
 const LUBE_DEF = { delivery_date: '', forward_date: '', additive: { product: 'GulfSea Cylcare 50140', stock_kg: '', tank_kg: 54000, unusable_kg: 500, target_bn: 50, blended_stock_kg: 0, blend_consumption_kg_month: 5000 },
   meso: { stock_kg: '', sump_kg: 48480, safety_stock_kg: 36000, tank_kg: 56500, consumption_kg_month: 200, bn: 6 }, tpeo: { stock_kg: '', sump_kg: 2500, tank_kg: 10000, consumption_kg_month: 800, changeouts: 0 }, mdcl2: { bn: 70, stock_kg: 0, consumption_kg_month: 0 } };
-function lubeOrderState() { const s = db.get('meta/lubeorder'); return s ? JSON.parse(JSON.stringify(s)) : JSON.parse(JSON.stringify(LUBE_DEF)) }
+function lubeOrderState() { if (!S.loDraft) { const s = db.get('meta/lubeorder'); S.loDraft = JSON.parse(JSON.stringify(s || LUBE_DEF)) } return S.loDraft }
 function orderView() {
   const p = lubeOrderState(), f = (path, label, type = 'number') => { const [a, b] = path.split('.'); const v = b ? p[a][b] : p[a]; return `<label class="f">${label}<input ${type === 'number' ? 'inputmode="decimal" type="number" step="any"' : 'type="' + type + '"'} data-lo="${path}" value="${esc(v ?? '')}"></label>` };
   let r = null, err = '';
@@ -464,16 +455,176 @@ function logBook(kind) {
   ${list.length > shown.length ? `<button class="btn" data-act="lgmore">Показать ещё</button>` : ''}`;
 }
 
+
+/* ---------- Наработка компонентов ГД (ME RHRS) ---------- */
+function vRhrs() {
+  const meta = db.get('rhrs-meta/current'), groups = db.all('rhrs').sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+  if (!groups.length) return `<div><h1>Наработка ГД</h1></div><div class="banner">Данные компонентов ещё не загружены. «Синхронизация» → «Загрузить копию» → файл данных.</div>`;
+  const RH = meta ? +meta.rh : null, log = db.all('rhrslog').sort((a, b) => b.id.localeCompare(a.id)).slice(0, 5);
+  const all = groups.flatMap(g => g.rows.map(r => ({ g, r, c: RR.calcRow(g, r, RH) })));
+  const over = all.filter(x => x.c.left != null && x.c.left < 0 || x.c.left2 != null && x.c.left2 < 0), soon = all.filter(x => !over.includes(x) && (x.c.left != null && x.c.left < 2000 || x.c.left2 != null && x.c.left2 < 2000));
+  const col = v => v == null ? '' : v < 0 ? 'bad' : v < 2000 ? 'warnc' : '';
+  const n0 = v => v == null ? '' : num(v, 0);
+  return `<div><h1>Наработка компонентов ГД</h1><div class="sub">Как в ME_RHRS: вводишь наработку ГД — остальное считается само</div></div>
+  <section class="card"><form id="rhf" class="rhf"><label class="f">Наработка ГД, ч<input name="rh" inputmode="numeric" type="number" value="${esc(RH ?? '')}" style="font-size:22px;font-weight:600"></label>
+   <div class="note">${meta ? 'Обновлено ' + dlong(meta.date) + (meta.by ? ' · ' + esc(meta.by) : '') : ''}${log.length ? '<br>История: ' + log.map(l => num(l.rh, 0) + ' (' + dlong(l.date) + ')').join(' · ') : ''}</div>
+   <button class="btn pri">Сохранить наработку</button></form></section>
+  <div class="grid2"><div class="stat"><b style="color:${over.length ? 'var(--red)' : 'inherit'}">${over.length}</b><span class="lbl">просрочено по часам</span></div><div class="stat"><b style="color:${soon.length ? 'var(--acc)' : 'inherit'}">${soon.length}</b><span class="lbl">осталось меньше 2000 ч</span></div></div>
+  ${over.length + soon.length ? `<section class="card"><h2>Требуют внимания</h2><div class="list mt">${[...over, ...soon].sort((a, b) => Math.min(a.c.left ?? 1e9, a.c.left2 ?? 1e9) - Math.min(b.c.left ?? 1e9, b.c.left2 ?? 1e9)).map(x => { const l = Math.min(x.c.left ?? 1e9, x.c.left2 ?? 1e9); return `<a class="t" href="#g-${esc(x.g.id)}" data-act="rhgo" data-g="${esc(x.g.id)}"><div class="tb"><span class="tt">${esc(x.g.title)} · ${esc(x.r.pos)}</span><span class="small ${l < 0 ? 'bad' : 'warnc'}">${l < 0 ? 'просрочено на ' + num(-l, 0) + ' ч' : 'осталось ' + num(l, 0) + ' ч'}${x.g.kind === 'fv' && x.c.left2 < x.c.left ? ' (направляющая шпинделя)' : ''}</span></div></a>` }).join('')}</div></section>` : ''}
+  ${groups.map(g => { const fv = g.kind === 'fv';
+    return `<section class="card" id="g-${esc(g.id)}"><div class="row between"><h2>${esc(g.title)}</h2><span class="sub">${g.interval ? 'интервал ' + num(g.interval, 0) + ' ч' : ''}${g.interval2 ? ' · направляющая шпинделя ' + num(g.interval2, 0) + ' ч' : ''}${g.kind === 'own' ? ' · свой счётчик' : ''}</span></div>
+    <div class="scroll mt"><table class="stack rh"><thead><tr><th>Поз.</th><th>Номер</th><th>Установлен</th><th>При наработке</th>${g.kind === 'own' ? '<th>Счётчик сейчас</th>' : ''}<th>${fv ? 'С опрессовки' : 'Отработал'}</th>${g.kind !== 'run' ? `<th>${fv ? 'До опрессовки' : 'До переборки'}</th>` : ''}${fv ? '<th>До замены направляющей</th>' : ''}${g.total ? '<th>Всего у детали</th>' : ''}<th>Заметка</th></tr></thead><tbody>
+    ${g.rows.map((r, i) => { const c = RR.calcRow(g, r, RH); return `<tr class="click" data-act="rhedit" data-g="${esc(g.id)}" data-i="${i}"><td data-l="Поз."><b>${esc(r.pos)}</b></td><td data-l="Номер">${esc(r.id || '')}</td><td data-l="Установлен">${r.date && /^\d{4}-/.test(r.date) ? dlong(r.date) + ' ' + r.date.slice(0, 4) : esc(r.date || '')}</td><td data-l="При наработке">${n0(r.rhInst)}</td>${g.kind === 'own' ? `<td data-l="Счётчик">${n0(r.own)}</td>` : ''}
+      <td data-l="${fv ? 'С опрессовки' : 'Отработал'}">${n0(c.run)}</td>${g.kind !== 'run' ? `<td data-l="${fv ? 'До опрессовки' : 'До переборки'}" class="${col(c.left)}"><b>${n0(c.left)}</b></td>` : ''}${fv ? `<td data-l="До направляющей" class="${col(c.left2)}"><b>${n0(c.left2)}</b></td>` : ''}${g.total ? `<td data-l="Всего">${n0(c.total)}</td>` : ''}<td data-l="Заметка" class="small">${esc(r.note || '')}</td></tr>` }).join('')}
+    </tbody></table></div></section>` }).join('')}
+  <div class="note">Нажми на строку, чтобы внести замену детали: дата, наработка ГД при установке, номер. В исходном Excel у крышек цилиндров «до переборки» считалось по интервалу втулок (70 000 ч) — здесь по своему интервалу ${num((groups.find(g => g.id === 'cover') || {}).interval || 24000, 0)} ч.</div>`;
+}
+function openRh(gid, i) {
+  const g = db.get('rhrs/' + gid), r = g.rows[i]; S.edit = { rh: true, gid, i };
+  const f = (k, l, t = 'text') => `<label class="f">${l}<input name="${k === 'id' ? '_pid' : k}" ${t === 'number' ? 'inputmode="numeric" type="number"' : 'type="' + t + '"'} value="${esc(r[k] ?? '')}"></label>`;
+  $('#modal').innerHTML = `<form class="sheet" id="rhrow"><div class="row between"><h2 id="mt">${esc(g.title)} · ${esc(r.pos)}</h2>${closeBtn()}</div>
+   <div class="fg">${f('id', 'Номер / ID')}${f('date', 'Дата установки', 'date')}${f('rhInst', 'Наработка ГД при установке', 'number')}${g.kind === 'fv' ? f('prior', 'Часы форсунки при установке', 'number') : g.total ? f('prior', 'Часы детали при установке', 'number') : ''}${g.kind === 'own' ? f('own', 'Счётчик сейчас', 'number') : ''}</div>
+   <label class="f">Заметка<textarea name="note">${esc(r.note || '')}</textarea></label>
+   <div class="row between"><label class="f" style="max-width:220px">Интервал группы, ч<input name="_interval" inputmode="numeric" type="number" value="${esc(g.interval ?? '')}"></label><div class="row"><button type="button" class="btn" data-act="close">Отмена</button><button class="btn pri">Сохранить</button></div></div></form>`;
+  $('#modal').hidden = false;
+}
+
+/* ---------- Рефы ---------- */
+function vReefer() {
+  const p = S.rfDraft || (S.rfDraft = { sw: '', n: '', hh: 24, mm: 0, ...(db.get('meta/reefer') || {}) }), perf = db.get('perf/meta'), seaT = perf && perf.last && perf.last.sea;
+  const ok = p.sw !== '' && p.n !== '', k = ok ? RR.reeferKWh(p.sw, p.n, p.hh, p.mm) : null, per = p.sw !== '' ? 1.787 + 0.054 * Math.min(35, Math.max(5, +p.sw)) : null;
+  const inp = (k2, l, extra = '') => `<label class="f">${l}<input inputmode="decimal" type="number" step="any" data-rf="${k2}" value="${esc(p[k2])}" ${extra}></label>`;
+  return `<div><h1>Расход энергии на рефы</h1><div class="sub">Reefer Consumption Calculator — когда счётчик кВт·ч не работает</div></div>
+  <section class="card"><div class="fg mt">${inp('sw', 'Температура забортной воды, °C', seaT != null ? `placeholder="StarConnect: ${seaT}"` : '')}${inp('n', 'Количество рефконтейнеров')}${inp('hh', 'Период, часов')}${inp('mm', 'и минут')}</div>
+  ${seaT != null && p.sw === '' ? `<button class="btn mt" data-act="rfsea">Взять ${seaT} °C из StarConnect</button>` : ''}</section>
+  <div class="grid2">${out('Расход за период', k != null ? num(k, 1) : '—', 'кВт·ч', 1)}${out('На один реф', per != null ? num(per, 3) : '—', 'кВт (кВт·ч в час)')}</div>
+  <div class="note">Формула из таблицы: кВт·ч = (1,787 + 0,054 × t забортной воды) × число рефов × часы. Температура ограничивается диапазоном 5…35 °C.</div>`;
+}
+
+/* ---------- PMS Workboard ---------- */
+const DS_RU = { Overdue: 'Просрочено', Due: 'Срок', 'Due Shortly': 'Скоро', 'Upcoming Due': 'Предстоит', 'Postponed to Drydock Approved': 'Перенесено в док' };
+function pmsJobs() { return db.all('pmswb').filter(d => d.jobs).flatMap(d => d.jobs) }
+function vPms() {
+  const jobs = pmsJobs(), meta = db.get('pmswb/meta');
+  if (!jobs.length) return `<div><h1>PMS Workboard</h1></div><div class="banner">Workboard ещё не загружен. Пришли мне свежую выгрузку maintenance-workboard.xlsx.</div>`;
+  const planned = new Set(live().flatMap(t => (t.pms || []).map(p => p.no))), q = (S.pmQ || '').toLowerCase();
+  const order = ['Overdue', 'Due', 'Postponed to Drydock Approved', 'Due Shortly', 'Upcoming Due'];
+  const L = jobs.filter(j => (!S.pmDs || j.ds === S.pmDs) && (S.pmResp === 'all' || (S.pmResp === 'eng' ? /Engineer|Electrician/.test(j.resp) : j.resp === S.pmResp)) && (!S.pmFree || !planned.has(j.no))
+    && (!q || (j.title + ' ' + j.eq + ' ' + j.no + ' ' + j.code).toLowerCase().includes(q))).sort((a, b) => order.indexOf(a.ds) - order.indexOf(b.ds) || (a.due || '9').localeCompare(b.due || '9'));
+  const cnt = k => jobs.filter(j => j.ds === k && (S.pmResp === 'all' || (S.pmResp === 'eng' ? /Engineer|Electrician/.test(j.resp) : j.resp === S.pmResp))).length;
+  const closed = live().filter(t => t.pmsClosed && t.status !== 'done');
+  return `<div><h1>PMS Workboard</h1><div class="sub">${jobs.length} работ · выгрузка ${meta ? dlong(meta.date) : ''} · связь с планировщиком по номеру работы</div></div>
+  ${closed.length ? `<section class="card"><h2 style="color:var(--blue)">Нет в Workboard — вероятно, закрыты в PMS · ${closed.length}</h2><div class="note">Проверь и отметь готовыми, если работа сделана.</div><div class="list mt">${closed.map(t => card(t, { day: true })).join('')}</div></section>` : ''}
+  <section class="card"><div class="chips">${['', ...order].map(k => `<button class="chip" data-act="pmds" data-c="${k}" aria-pressed="${(S.pmDs || '') === k}">${k ? DS_RU[k] + ' · ' + cnt(k) : 'Все'}</button>`).join('')}</div>
+   <div class="row mt"><input class="search" id="pmq" type="search" placeholder="Поиск: оборудование, название, номер" value="${esc(S.pmQ || '')}" aria-label="Поиск по PMS">
+   <select class="search" style="width:auto" id="pmresp"><option value="eng"${S.pmResp === 'eng' ? ' selected' : ''}>Машинная команда</option><option value="all"${S.pmResp === 'all' ? ' selected' : ''}>Все ответственные</option>${[...new Set(jobs.map(j => j.resp))].sort().map(r => `<option${S.pmResp === r ? ' selected' : ''}>${esc(r)}</option>`).join('')}</select>
+   <label class="sub"><input type="checkbox" data-act="pmfree" ${S.pmFree ? 'checked' : ''}> только не в плане</label></div></section>
+  <div class="note">Найдено: ${L.length}${L.length > S.pmMore ? ', показаны первые ' + S.pmMore : ''}</div>
+  <div class="list">${L.slice(0, S.pmMore).map(j => `<div class="lg${j.ds === 'Overdue' ? ' warnrow' : ''}"><div class="row between"><b>${esc(j.title)}</b><span class="tag ${j.ds === 'Overdue' ? 'warn' : ''}">${DS_RU[j.ds] || esc(j.ds)}</span></div>
+    <div class="ld">${esc(j.eq)} · ${esc(j.freq)}${j.tol ? ' (±' + esc(j.tol) + ')' : ''} · ${esc(j.resp)}</div>
+    <div class="row between"><span class="small">№ ${esc(j.no)} · ${esc(j.code || '')} · срок ${j.due ? dlong(j.due) + ' ' + j.due.slice(0, 4) : '—'}${j.ctr ? ' · по счётчику ' + num(j.ctr, 0) + ' ч (сейчас ' + num(j.rh, 0) + ')' : ''}${j.last ? ' · последний раз ' + j.last : ''} · ${esc(j.js)}</span>
+    ${planned.has(j.no) ? '<span class="tag">в плане</span>' : `<button class="btn" data-act="pmadd" data-no="${esc(j.no)}">В план</button>`}</div></div>`).join('') || '<div class="empty">Ничего не найдено</div>'}</div>
+  ${L.length > S.pmMore ? '<button class="btn" data-act="pmmore">Показать ещё</button>' : ''}`;
+}
+
+/* ---------- ME performance (StarConnect) ---------- */
+const PERF = { load: [['pw', 'Мощность ГД, кВт', 0], ['rpm', 'Обороты, об/мин', 1], ['fi', 'Индекс топлива, %', 1], ['sog', 'Скорость, уз', 1]],
+  exh: [1, 2, 3, 4, 5, 6].map(c => ['exh' + c, 'Цил. ' + c, 0]), pmax: [1, 2, 3, 4, 5, 6].map(c => ['pmax' + c, 'Цил. ' + c, 1]), pcomp: [1, 2, 3, 4, 5, 6].map(c => ['pcomp' + c, 'Цил. ' + c, 1]),
+  tc: [['tc1', 'ТК1, об/мин', 0], ['tc2', 'ТК2, об/мин', 0], ['tcin1', 'ТК1 газ вход, °C', 0], ['tcin2', 'ТК2 газ вход, °C', 0], ['tcout1', 'ТК1 газ выход, °C', 0], ['tcout2', 'ТК2 газ выход, °C', 0]],
+  air: [['scavP', 'Pscav, бар', 2], ['scavT', 'Tscav, °C', 1], ['exhP', 'Выпускной ресивер, бар', 2], ['sacIn1', 'Возд. охл. 1 вход, °C', 0], ['sacOut1', 'Возд. охл. 1 выход, °C', 1], ['sacIn2', 'Возд. охл. 2 вход, °C', 0], ['sacOut2', 'Возд. охл. 2 выход, °C', 1], ['sacCW', 'Охл. вода выход, °C', 1]],
+  sys: [['jcw', 'ЦОВ выход, °C', 1], ['lo', 'Масло вход, °C', 1], ['hydP', 'Гидравлика, бар', 0], ['visc', 'Вязкость топлива, сСт', 1], ['fuelT', 'Т топлива, °C', 1], ['sea', 'Забортная вода, °C', 1], ['er', 'МО, °C', 1]],
+  ae: [['ae1', 'ДГ1, кВт', 0], ['ae2', 'ДГ2, кВт', 0], ['ae3', 'ДГ3, кВт', 0], ['ae1h', 'ДГ1, ч', 0], ['ae2h', 'ДГ2, ч', 0], ['ae3h', 'ДГ3, ч', 0], ['whr', 'WHR, кВт', 0]] };
+const PERF_T = { load: 'Нагрузка', exh: 'Т выхлопа по цилиндрам, °C', pmax: 'Pmax, бар', pcomp: 'Pcomp, бар', tc: 'Турбокомпрессоры', air: 'Продувочный воздух и охладители', sys: 'Системы', ae: 'ДГ и WHR' };
+function vPerf() {
+  const meta = db.get('perf/meta'), days = db.all('perf').filter(d => /^day-/.test(d.id)).sort((a, b) => b.id.localeCompare(a.id));
+  if (!meta) return `<div><h1>ME performance</h1></div><div class="banner">Данных StarConnect ещё нет. Пришли мне выгрузку CAMS ICS (.xlsx) — разберу и загружу.</div>`;
+  const grp = S.pfG || 'exh', defs = PERF[grp], sea = days.filter(d => d.n > 0), L = meta.last || {};
+  const cyl = ['exh', 'pmax', 'pcomp'].includes(grp);
+  const dev = (d, k) => { if (!cyl) return null; const vals = defs.map(x => d[x[0]]).filter(v => v != null); const m = vals.reduce((a, b) => a + b, 0) / vals.length; return d[k] != null ? d[k] - m : null };
+  return `<div><h1>ME performance</h1><div class="sub">StarConnect / ACONIS · ${dlong(meta.from)} — ${dlong(meta.to)} · средние за сутки на ходу (ГД > 5000 кВт)</div></div>
+  <section class="card"><h2>Последние значения · ${L.t ? L.t.replace('T', ' ') : ''}</h2><div class="grid4 mt">${[['pw', 'Мощность ГД', 'кВт', 0], ['rpm', 'Обороты', 'об/мин', 1], ['fi', 'Индекс топлива', '%', 1], ['scavP', 'Pscav', 'бар', 2]].map(([k, l, u, d]) => out(l, L[k] != null ? num(L[k], d) : '—', u)).join('')}</div>
+  <div class="note mt">Осадка ${L.dfwd ?? '—'} / ${L.daft ?? '—'} м · забортная вода ${L.sea ?? '—'} °C · МО ${L.er ?? '—'} °C · ДГ: ${[1, 2, 3].map(i => L['ae' + i] > 50 ? 'ДГ' + i + ' ' + num(L['ae' + i], 0) + ' кВт' : '').filter(Boolean).join(', ') || 'нет нагрузки'}</div></section>
+  <div class="tabs" role="tablist">${Object.keys(PERF).map(k => `<button role="tab" data-act="pfg" data-g="${k}" aria-selected="${grp === k}">${PERF_T[k].split(',')[0]}</button>`).join('')}</div>
+  ${sea.length > 1 ? `<section class="card"><h2>${PERF_T[grp]}</h2>${perfChart(sea.slice().reverse(), defs)}<div class="legend">${defs.map((x, i) => `<span><i style="background:${CYL_COL[i % 6]}"></i>${esc(x[1])}</span>`).join('')}</div></section>` : ''}
+  <section class="card"><h2>По суткам${cyl ? ' · отклонение от среднего по цилиндрам' : ''}</h2><div class="scroll mt"><table class="mtab"><thead><tr><th class="stick">Дата</th><th>Часов на ходу</th>${defs.map(x => `<th>${esc(x[1])}</th>`).join('')}</tr></thead><tbody>
+  ${days.map(d => `<tr><th class="stick">${dlong(d.id.slice(4))}</th><td>${d.hours ?? ''}</td>${defs.map(([k, l, dp]) => { const v = d[k], dv = dev(d, k); return `<td>${v != null ? num(v, dp) : ''}${dv != null && d.n ? `<small class="${Math.abs(dv) > (grp === 'exh' ? 15 : 3) ? 'bad' : 'note'}"> ${dv > 0 ? '+' : ''}${num(dv, grp === 'exh' ? 0 : 1)}</small>` : ''}</td>` }).join('')}</tr>`).join('')}
+  </tbody></table></div><div class="note">Отклонение подсвечивается, если оно больше 15 °C для выхлопа или 3 бар для давлений: это ориентир для глаза, а не лимит MAN.</div></section>`;
+}
+function perfChart(rows, defs) {
+  const W = 640, H = 220, P = 44, n = rows.length, vals = rows.flatMap(r => defs.map(d => r[d[0]])).filter(v => v != null);
+  if (!vals.length) return '<div class="empty">Нет данных</div>';
+  let mn = Math.min(...vals), mx = Math.max(...vals); const pad = (mx - mn) * .1 || 1; mn -= pad; mx += pad;
+  const x = i => P + (n < 2 ? 0 : i / (n - 1) * (W - P - 12)), y = v => H - 26 - (v - mn) / (mx - mn) * (H - 44);
+  const ticks = [0, .25, .5, .75, 1].map(f => mn + (mx - mn) * f);
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Тренд">${ticks.map(t => `<line x1="${P}" x2="${W - 10}" y1="${y(t)}" y2="${y(t)}" class="gl"/><text x="${P - 6}" y="${y(t) + 4}" text-anchor="end">${num(t, mx - mn < 10 ? 1 : 0)}</text>`).join('')}
+  ${rows.map((r, i) => i % Math.ceil(n / 8) === 0 ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${r.id.slice(12, 14)}.${r.id.slice(9, 11)}</text>` : '').join('')}
+  ${defs.map((d, k) => { let p = '', pen = false; rows.forEach((r, i) => { const v = r[d[0]]; if (v == null) { pen = false; return } p += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1); pen = true }); return `<path d="${p}" fill="none" stroke="${CYL_COL[k % 6]}" stroke-width="2" stroke-linejoin="round"/>` }).join('')}</svg>`;
+}
+
+/* ---------- Bearing Wear Monitoring (Kongsberg BWCM) ---------- */
+const BWM_M = { dev: 'Отклонение цилиндра (DEV), мм', s1: 'Датчик носовой (SNS 1 DEV), мм', s2: 'Датчик кормовой (SNS 2 DEV), мм', mb: 'Рамовые подшипники (DMMB SUM), мм' };
+function vBwm() {
+  const meta = db.get('bwm/meta'), months = db.all('bwm').filter(d => /^m-/.test(d.id)).sort((a, b) => a.month.localeCompare(b.month)), lim = db.get('meta/bwmlimits') || {};
+  if (!months.length) return `<div><h1>Bearing Wear Monitoring</h1><div class="sub">Kongsberg BWM</div></div><div class="banner">Данных BWM ещё нет. Пришли архив KM-Service (.zip) — разберу и загружу тренды.</div>`;
+  const met = S.bwM || 'dev', last = months[months.length - 1], yago = months.find(m => m.month === String(+last.month.slice(0, 4) - 1) + last.month.slice(4)) || months[Math.max(0, months.length - 13)];
+  const base = months.find(m => m.month >= '2016-01' && Object.keys(m.cyl).length === 6) || months[0];
+  const val = (m, c) => met === 'mb' ? (m.mb || {})[c] : m.cyl[c] && m.cyl[c][met];
+  const L = +lim.dev || null, cyls = met === 'mb' ? [2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6];
+  const st = (meta && meta.status) || {}, from = S.bwFrom || '';
+  const shown = months.filter(m => !from || m.month >= from);
+  return `<div><h1>Bearing Wear Monitoring</h1><div class="sub">${esc(meta?.system || 'Kongsberg BWM')} · ${esc(meta?.engine || '')} · данные ${dlongM(months[0].month)} — ${dlongM(last.month)}</div></div>
+  <section class="card"><div class="row between"><h2>Состояние по цилиндрам</h2><span class="sub">статус системы на ${meta ? dlong(meta.statusDate) : '—'}</span></div>
+   <div class="cyl mt">${[1, 2, 3, 4, 5, 6].map(c => { const now = last.cyl[c] && last.cyl[c].dev, d12 = now != null && yago.cyl[c] ? now - yago.cyl[c].dev : null, d0 = now != null && base.cyl[c] ? now - base.cyl[c].dev : null, s = st[c];
+     return `<div class="cy${s === 'Alarm' || (L && Math.abs(now) >= L) ? ' bad' : ''}"><span class="lbl">Цил. ${c}${s ? ' · ' + (s === 'Alarm' ? '<span class="bad">Alarm</span>' : 'Normal') : ''}</span><b>${now != null ? fmtmm(now) : '—'}</b><span class="lbl">за год ${d12 != null ? sign(d12) : '—'} · с ${base.month.slice(0, 4)} ${d0 != null ? sign(d0) : '—'}</span></div>` }).join('')}</div>
+   <div class="note mt">DEV — медиана за ${dlongM(last.month)}: смещение положения крейцкопфа в НМТ относительно эталона, мм. Отражает суммарный износ рамового, мотылевого и крейцкопфного подшипников цилиндра. «Alarm» — статус в самой системе Kongsberg${meta?.hi?.length ? `; последние превышения HI: ${meta.hi.slice(-3).map(h => esc(h.date.slice(0, 10)) + ' ' + esc(h.msg.replace(/.*tag (\S+)\. .*Value = ([\d.]+).*/, '$1 = $2'))).join('; ')}` : ''}.</div></section>
+  <section class="card"><div class="row between"><h2>Тренд · ${BWM_M[met]}</h2><div class="row"><select class="search" style="width:auto" id="bwfrom" aria-label="Период"><option value="">С ${months[0].month.slice(0, 4)}</option>${['2020-01', '2022-01', '2024-01', '2025-11'].map(v => `<option value="${v}"${from === v ? ' selected' : ''}>С ${v.slice(0, 4) === '2025' ? 'последнего года' : v.slice(0, 4)}</option>`).join('')}</select></div></div>
+   <div class="chips mt">${Object.entries(BWM_M).map(([k, l]) => `<button class="chip" data-act="bwm" data-m="${k}" aria-pressed="${met === k}">${l.split(',')[0]}</button>`).join('')}</div>
+   ${bwmChart(shown, cyls, c => m => val(m, c), met === 'mb' ? null : L)}
+   <div class="legend">${cyls.map(c => `<span><i style="background:${CYL_COL[c - 1]}"></i>${met === 'mb' ? 'Рам. ' + c : 'Цил. ' + c}</span>`).join('')}${L && met !== 'mb' ? `<span><i style="background:var(--red)"></i>предел ±${L} мм</span>` : ''}</div></section>
+  <section class="card"><h2>Таблица по месяцам · ${BWM_M[met]}</h2><div class="scroll mt"><table class="mtab"><thead><tr><th class="stick">Месяц</th><th>Наработка</th>${cyls.map(c => `<th>${met === 'mb' ? 'Рам. ' : 'Цил. '}${c}</th>`).join('')}</tr></thead><tbody>
+   ${shown.slice().reverse().slice(0, S.bwAll ? 999 : 24).map((m, i, arr) => { const prev = arr[i + 1]; return `<tr class="click" data-act="bwday" data-m="${m.month}"><th class="stick">${dlongM(m.month)}</th><td>${m.rh ? num(m.rh, 0) : ''}</td>${cyls.map(c => { const v = val(m, c), p = prev ? val(prev, c) : null, d = v != null && p != null ? v - p : null;
+     return `<td class="${L && met !== 'mb' && v != null && Math.abs(v) >= L ? 'bad' : ''}">${v != null ? fmtmm(v) : ''}${d != null && Math.abs(d) >= .005 ? `<small class="${d > 0 ? 'up' : 'dn'}"> ${sign(d)}</small>` : ''}</td>` }).join('')}</tr>` }).join('')}
+   </tbody></table></div>${shown.length > 24 && !S.bwAll ? `<button class="btn mt" data-act="bwall">Показать все месяцы (${shown.length})</button>` : ''}<div class="note">Нажми на месяц, чтобы открыть значения по дням. Изменение к прошлому месяцу показано, если оно не меньше 0,005 мм.</div></section>
+  ${S.bwDay ? bwmDays(months.find(m => m.month === S.bwDay)) : ''}
+  <section class="card"><h2>Пределы алармов</h2><div class="note">Впиши предел отклонения DEV из настроек системы Kongsberg на судне или из инструкции MAN. Значения, достигшие предела, подсветятся красным, на графике появится линия.</div>
+   <form id="bwlimf" class="fg mt"><label class="f">Предел DEV, ± мм<input inputmode="decimal" type="number" step="any" name="dev" value="${esc(lim.dev ?? '')}"></label><div class="f" style="justify-content:flex-end"><button class="btn">Сохранить предел</button></div></form></section>
+  ${meta && meta.events ? `<section class="card"><h2>Журнал событий системы</h2><div class="note">По месяцам, до ${esc(meta.eventsTo.slice(0, 10))}</div><div class="scroll mt"><table class="stack"><thead><tr><th>Месяц</th><th>Событие</th><th>Раз</th></tr></thead><tbody>${meta.events.slice(0, 15).map(e => `<tr><td data-l="Месяц">${esc(e.month)}</td><td data-l="Событие">${esc(e.what)}</td><td data-l="Раз">${e.n}</td></tr>`).join('')}</tbody></table></div></section>` : ''}`;
+}
+const fmtmm = v => (v > 0 ? '+' : '') + num(v, 3);
+const sign = v => (v > 0 ? '+' : '') + num(v, 3);
+const dlongM = m => MON1[+m.slice(5, 7) - 1] + ' ' + m.slice(0, 4);
+function bwmChart(months, cyls, getter, L) {
+  const W = 680, H = 240, P = 48, n = months.length, vals = months.flatMap(m => cyls.map(c => getter(c)(m))).filter(v => v != null);
+  let mn = Math.min(...vals, L ? -L : 0), mx = Math.max(...vals, L ? L : 0); const pad = (mx - mn) * .08 || .01; mn -= pad; mx += pad;
+  const x = i => P + (n < 2 ? 0 : i / (n - 1) * (W - P - 12)), y = v => H - 26 - (v - mn) / (mx - mn) * (H - 44);
+  const step = (mx - mn) > .2 ? .05 : (mx - mn) > .08 ? .02 : .01, ticks = []; for (let t = Math.ceil(mn / step) * step; t <= mx; t += step) ticks.push(+t.toFixed(3));
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Тренд BWM">${ticks.map(t => `<line x1="${P}" x2="${W - 10}" y1="${y(t)}" y2="${y(t)}" class="gl"${t === 0 ? ' style="stroke:#3A4A5C"' : ''}/><text x="${P - 6}" y="${y(t) + 4}" text-anchor="end">${num(t, 2)}</text>`).join('')}
+   ${L ? [L, -L].map(l => `<line x1="${P}" x2="${W - 10}" y1="${y(l)}" y2="${y(l)}" stroke="var(--red)" stroke-dasharray="5 4"/>`).join('') : ''}
+   ${months.map((m, i) => m.month.endsWith('-01') && (n < 40 || +m.month.slice(0, 4) % 2 === 0) ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${n < 30 ? m.month.slice(5, 7) + '.' : ''}${m.month.slice(0, 4)}</text>` : '').join('')}
+   ${cyls.map(c => { let p = '', pen = false; months.forEach((m, i) => { const v = getter(c)(m); if (v == null) { pen = false; return } p += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1); pen = true }); return `<path d="${p}" fill="none" stroke="${CYL_COL[c - 1]}" stroke-width="2" stroke-linejoin="round"/>` }).join('')}</svg>`;
+}
+function bwmDays(m) {
+  if (!m || !m.days || !m.days.length) return '';
+  const rows = m.days.map(d => ({ month: d[0], vals: d.slice(1) }));
+  return `<section class="card"><div class="row between"><h2>${dlongM(m.month)} по дням · DEV, мм</h2><button class="btn" data-act="bwday" data-m="">Закрыть</button></div>
+   ${bwmChart(rows, [1, 2, 3, 4, 5, 6], c => r => r.vals[c - 1], +(db.get('meta/bwmlimits') || {}).dev || null)}
+   <div class="scroll mt"><table class="mtab"><thead><tr><th class="stick">Дата</th>${[1, 2, 3, 4, 5, 6].map(c => `<th>Цил. ${c}</th>`).join('')}</tr></thead><tbody>${rows.slice().reverse().map(r => `<tr><th class="stick">${dlong(r.month)}</th>${r.vals.map(v => `<td>${v != null ? fmtmm(v) : ''}</td>`).join('')}</tr>`).join('')}</tbody></table></div></section>`;
+}
+
 /* ---------- Ещё (телефон) ---------- */
 function vMore() {
   const c = counts(), n = c.over + c.inbox + c.stale;
   const it = (href, title, sub, badge) => `<a class="t" href="${href}"><div class="tb"><span class="tt">${title}</span><span class="small">${sub}</span></div>${badge ? `<span class="tag warn">${badge}</span>` : ''}</a>`;
   return `<div><h1>Ещё</h1><div class="sub">Остальные разделы</div></div><div class="list">
+   ${it('#rhrs', 'Наработка ГД', 'Компоненты: клапаны, форсунки, поршни, втулки, HCU')}
+   ${it('#pms', 'PMS Workboard', 'Работы из ShipManager, связь с планировщиком')}
+   ${it('#perf', 'ME performance', 'StarConnect / ACONIS: выхлоп, Pmax, ТК, воздух')}
    ${it('#log', 'Logbook', 'Scrape-down ГД · ORB Part I · Biofouling')}
+   ${it('#reefer', 'Рефы', 'Расход энергии на рефконтейнеры')}
    ${it('#alerts', 'Уведомления', 'Просрочки, входящие, устаревшие источники', n || '')}
    ${it('#bwm', 'Bearing monitoring', 'Kongsberg BWM · месячные отчёты')}
    ${it('#sync', 'Синхронизация', 'Облако, резервная копия, источники, настройки')}</div>
-   <section class="card"><h2>Скоро</h2><div class="note mt">Заказы и заявки · Запчасти · Док 2026 и ABS · StarConnect · ACONIS · ME performance · Handover · Отчёты · Почта</div></section>`;
+   <section class="card"><h2>Скоро</h2><div class="note mt">Заказы и заявки · Запчасти · Док 2026 и ABS · ACONIS · ME performance · Handover · Отчёты · Почта</div></section>`;
 }
 
 /* ---------- editor ---------- */
@@ -518,8 +669,8 @@ function mic(btn) {
 /* ---------- render ---------- */
 function render() {
   const m = $('#main'); const keep = focusSel(document.activeElement);
-  m.innerHTML = { plan: vPlan, alerts: vAlerts, tanks: vTanks, lube: vLube, log: vLog, bwm: vBwm, sync: vSync, more: vMore }[S.view]?.() ?? vToday();
-  document.querySelectorAll('[data-v]').forEach(a => a.setAttribute('aria-current', a.dataset.v === S.view || (a.hasAttribute('data-more') && ['alerts', 'bwm', 'sync', 'log'].includes(S.view)) ? 'page' : 'false'));
+  m.innerHTML = { plan: vPlan, alerts: vAlerts, tanks: vTanks, lube: vLube, log: vLog, rhrs: vRhrs, reefer: vReefer, pms: vPms, perf: vPerf, bwm: vBwm, sync: vSync, more: vMore }[S.view]?.() ?? vToday();
+  document.querySelectorAll('[data-v]').forEach(a => a.setAttribute('aria-current', a.dataset.v === S.view || (a.hasAttribute('data-more') && ['alerts', 'bwm', 'sync', 'log', 'rhrs', 'pms', 'perf', 'reefer'].includes(S.view)) ? 'page' : 'false'));
   const c = counts(), n = c.over + c.inbox + c.stale; document.querySelectorAll('[data-cnt]').forEach(x => { x.hidden = !n; x.textContent = n });
   const st = db.status; $('#sfoot').textContent = { local: 'На устройстве', idle: 'Синхронизировано', syncing: 'Синхронизация…', offline: 'Офлайн', error: 'Ошибка синхронизации' }[st.state];
   $('#sdot').style.background = { local: 'var(--mute)', idle: 'var(--green)', syncing: 'var(--blue)', offline: 'var(--acc)', error: 'var(--red)' }[st.state];
@@ -533,6 +684,7 @@ function focusSel(ae) {
   const d = ae.dataset || {};
   if (d.snd) return `[data-snd="${q(d.snd)}"]`;
   if (d.rob) return `[data-rob="${q(d.rob)}"][data-f="${q(d.f)}"]`;
+  if (d.rf) return `[data-rf="${q(d.rf)}"]`;
   if (d.lo) return `[data-lo="${q(d.lo)}"]`;
   if (d.sc) return d.i != null ? `[data-sc="${q(d.sc)}"][data-i="${q(d.i)}"]` : `[data-sc="${q(d.sc)}"]`;
   if (d.clo !== undefined) return `[data-clo][name="${q(ae.name)}"]`;
@@ -564,6 +716,17 @@ document.addEventListener('click', e => {
   if (a === 'mic' && SR) mic(el);
   if (a === 'ltab') { S.lubeTab = el.dataset.t; render() }
   if (a === 'ttab') { S.tankTab = el.dataset.t; render() }
+  if (a === 'rhedit') openRh(el.dataset.g, +el.dataset.i);
+  if (a === 'rhgo') { e.preventDefault(); document.getElementById('g-' + el.dataset.g)?.scrollIntoView({ behavior: 'smooth' }) }
+  if (a === 'rfsea') { S.rfDraft.sw = db.get('perf/meta').last.sea; put('meta/reefer', { ...S.rfDraft }).then(render) }
+  if (a === 'pmds') { S.pmDs = el.dataset.c; S.pmMore = 80; render() }
+  if (a === 'pmfree') { S.pmFree = el.checked; render() }
+  if (a === 'pmmore') { S.pmMore += 200; render() }
+  if (a === 'pmadd') { const j = pmsJobs().find(x => x.no === el.dataset.no); if (j) { const t = { id: 't-pms-' + j.no.replace(/\D/g, ''), title: j.title, note: `PMS ${j.no} · ${j.eq} · ${j.freq}`, cat: 'PMS', prio: j.ds === 'Overdue' ? 1 : 2, owner: j.resp, due: j.due, day: j.due && j.due > today() ? j.due : today(), status: 'todo', source: 'Workboard', pms: [{ no: j.no, ds: j.ds, js: j.js, due: j.due }], created: today() }; saveTask(t, 'Добавлено в план на ' + dshort(t.day), { id: t.id, _new: true }) } }
+  if (a === 'pfg') { S.pfG = el.dataset.g; render() }
+  if (a === 'bwall') { S.bwAll = true; render() }
+  if (a === 'bwm') { S.bwM = el.dataset.m; render() }
+  if (a === 'bwday') { S.bwDay = el.dataset.m; render(); if (S.bwDay) setTimeout(() => document.querySelector('[data-act=bwday][data-m=""]')?.scrollIntoView({ block: 'center' }), 50) }
   if (a === 'lgtab') { S.logTab = el.dataset.t; S.lgMore = 100; S.lgQ = ''; S.lgYear = null; render() }
   if (a === 'lgcode') { S.lgCode = el.dataset.c; S.lgMore = 100; render() }
   if (a === 'lgmore') { S.lgMore += 200; render() }
@@ -601,15 +764,19 @@ addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden
 document.addEventListener('input', e => {
   if (e.target.id === 'q') { S.q = e.target.value; clearTimeout(S.qt); S.qt = setTimeout(render, 200) }
   const ds = e.target.dataset || {};
+  if (ds.rf) { S.rfDraft[ds.rf] = e.target.value; clearTimeout(S.ct); S.ct = setTimeout(() => put('meta/reefer', { ...S.rfDraft }).then(render), 300) }
+  if (e.target.id === 'pmq') { S.pmQ = e.target.value; S.pmMore = 80; clearTimeout(S.qt); S.qt = setTimeout(render, 250) }
   if (ds.sc) { const D = S.scDraft; if (ds.i != null) D[ds.sc][+ds.i] = e.target.value; else D[ds.sc] = e.target.value }
   if (e.target.id === 'lgq') { S.lgQ = e.target.value; S.lgMore = 100; clearTimeout(S.qt); S.qt = setTimeout(render, 250) }
   if (ds.snd) { S.sDraft[ds.snd] = e.target.value; clearTimeout(S.st); S.st = setTimeout(render, 350) }
   if (ds.rob) { const I = robInputs(); (I.tanks[ds.rob] ||= {})[ds.f] = e.target.value; clearTimeout(S.st); S.st = setTimeout(render, 400) }
   if (e.target.form && e.target.form.id === 'robh') { robInputs()[e.target.name] = e.target.value; clearTimeout(S.st); S.st = setTimeout(render, 400) }
-  if (ds.lo) { const p = lubeOrderState(), [a, b] = ds.lo.split('.'); if (b) p[a][b] = e.target.value; else p[a] = e.target.value; clearTimeout(S.ct); S.ct = setTimeout(() => put('meta/lubeorder', p).then(render), 300) }
+  if (ds.lo) { const p = lubeOrderState(), [a, b] = ds.lo.split('.'); if (b) p[a][b] = e.target.value; else p[a] = e.target.value; clearTimeout(S.ct); S.ct = setTimeout(() => put('meta/lubeorder', JSON.parse(JSON.stringify(p))).then(render), 300) }
   if (e.target.dataset.clo !== undefined) { const p = cloState(); p[e.target.name] = e.target.value; clearTimeout(S.ct); S.ct = setTimeout(() => { put('meta/clo', p).then(render) }, 250) }
 });
 document.addEventListener('change', e => {
+  if (e.target.id === 'pmresp') { S.pmResp = e.target.value; render() }
+  if (e.target.id === 'bwfrom') { S.bwFrom = e.target.value; render() }
   if (e.target.id === 'lgyear') { S.lgYear = e.target.value; S.lgMore = 100; render() }
   if (e.target.id === 'sdate' && e.target.value) { S.sDate = e.target.value; render() }
   if (e.target.id === 'impf' && e.target.files[0]) { e.target.files[0].text().then(t => db.importAll(JSON.parse(t))).then(n => { toast('Загружено записей: ' + n) }).catch(x => toast(x.message)) }
@@ -622,6 +789,12 @@ document.addEventListener('submit', e => {
     const nw = S.edit.isNew; closeEd(); saveTask(t, nw ? 'Задача добавлена' : 'Сохранено', prev); if (nw) feed('Новая задача: ' + t.title) }
   if (id === 'rowf' && S.edit) { const body = {}; for (const [k, v] of f.entries()) if (String(v).trim() !== '') body[k] = String(v).trim();
     const p = S.edit.col + '/' + S.edit.rid; body.updatedBy = 'Ярослав'; closeEd(); put(p, body).then(() => { render(); toast('Сохранено') }) }
+  if (id === 'rhf') { const v = +f.get('rh'); if (!v) return; const cur = db.get('rhrs-meta/current'); if (cur && v < cur.rh) { toast('Наработка меньше прежней (' + cur.rh + '). Проверь цифру'); return }
+    put('rhrs-meta/current', { rh: v, date: today(), by: 'Ярослав' }); put('rhrslog/' + today(), { rh: v, date: today() }).then(render); toast('Наработка ГД ' + num(v, 0) + ' ч сохранена') }
+  if (id === 'rhrow' && S.edit && S.edit.rh) { const g = JSON.parse(JSON.stringify(db.get('rhrs/' + S.edit.gid))), r = g.rows[S.edit.i];
+    for (const [k, v] of f.entries()) { if (k === '_interval') { if (v) g.interval = +v; continue } if (k === '_pid') { r.id = v; continue } r[k] = ['rhInst', 'prior', 'own'].includes(k) ? (v === '' ? null : +v) : v }
+    const gid = S.edit.gid; delete g.id; closeEd(); put('rhrs/' + gid, g).then(() => { render(); toast('Сохранено: ' + g.title + ' · ' + r.pos) }) }
+  if (id === 'bwlimf') { const v = f.get('dev'); put('meta/bwmlimits', v ? { dev: +v } : {}).then(render); toast('Предел сохранён') }
   if (id === 'limf') { const l = {}; for (const [k, v] of f.entries()) if (v !== '') l[k] = +v; put('meta/scrapelimits', l).then(render); toast('Пределы сохранены') }
   if (id === 'setf') { const s = { ...S.settings }; for (const [k, v] of f.entries()) s[k] = k === 'dayLimit' ? Number(v) || 8 : String(v); S.settings = s; put('meta/settings', s).then(render); toast('Настройки сохранены') }
   if (id === 'remf') { const cfg = Object.fromEntries(f.entries()); if ((cfg.space || '').trim().length < 24) { toast('Код пространства — минимум 24 символа. Нажми «Создать код»'); return } toast('Подключаю…'); db.setRemote(cfg).then(r => { render(); toast(r && r.pulled !== undefined ? 'Подключено: получено ' + r.pulled + ', отправлено ' + r.pushed : 'Сохранено') }).catch(x => { render(); toast(x.message) }) }
