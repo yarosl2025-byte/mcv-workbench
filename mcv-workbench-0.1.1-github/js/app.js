@@ -4,7 +4,7 @@ import * as T from './tanks.js';
 import * as RR from './rhrs.js';
 import * as ENG from './eng.js';
 
-const VERSION = '0.5.0';
+const VERSION = '0.5.1';
 const CATS = ['Док', 'PMS', 'ABS', 'Заказы', 'Офис', 'Текущие', 'IT', 'Logbook', 'Отчёты', 'Почта'];
 const ST = { inbox: 'Входящие', todo: 'Нужно сделать', doing: 'В работе', wait: 'Ждём', done: 'Готово' };
 const SLOTS = { '': 'Без времени', am: 'Утро', noon: 'До обеда', pm: 'После обеда', eve: 'Вечер' };
@@ -12,7 +12,7 @@ const REP = { '': 'Нет', daily: 'Каждый день', weekly: 'Кажду�
 const DOW = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MON = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 const MON1 = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-const VIEWS = ['today', 'plan', 'alerts', 'pms', 'rhrs', 'perf', 'tanks', 'lube', 'reefer', 'log', 'bwm', 'oil', 'dg', 'fuel', 'notes', 'sync', 'more'];
+const VIEWS = ['today', 'plan', 'alerts', 'pms', 'rhrs', 'perf', 'tanks', 'lube', 'reefer', 'log', 'bwm', 'oil', 'dg', 'fuel', 'notes', 'lochart', 'sync', 'more'];
 
 const S = { tasks: new Map(), sources: [], feed: [], settings: {}, loaded: false,
   view: 'today', mode: 'week', off: 0, sel: null, cat: '', q: '', hideDone: true, mOff: 0, rolled: false, edit: null, undo: null,
@@ -626,6 +626,7 @@ function vMore() {
    ${it('#pms', 'PMS Workboard', 'Работы из ShipManager, связь с планировщиком')}
    ${it('#notes', 'Заметки', 'Голосовая диктовка, перенос в задачи и вопросы Claude')}
    ${it('#perf', 'ME performance', 'StarConnect по суткам · отчёты ISO · PMI по цилиндрам')}
+   ${it('#lochart', 'Заправка систем', 'Lube Oil Chart: литры по механизмам и танкам, запас на борту')}
    ${it('#oil', 'Анализы масла', 'VPS OCM: все агрегаты, история и тренды')}
    ${it('#dg', 'ДГ performance', 'AE1–AE3: Doctor, ISO, формы, по цилиндрам')}
    ${it('#fuel', 'Расход топлива', 'StarConnect расходомеры: сутки, SFOC по нагрузке, счётчики')}
@@ -680,7 +681,7 @@ function mic(btn) {
 function render() {
   const m = $('#main'); const keep = focusSel(document.activeElement);
   m.innerHTML = { plan: vPlan, alerts: vAlerts, tanks: vTanks, lube: vLube, log: vLog, rhrs: vRhrs, reefer: vReefer, pms: vPms, perf: vPerf, bwm: vBwm, sync: vSync, more: vMore, ...ENG.VIEWS }[S.view]?.() ?? vToday();
-  document.querySelectorAll('[data-v]').forEach(a => a.setAttribute('aria-current', a.dataset.v === S.view || (a.hasAttribute('data-more') && ['alerts', 'bwm', 'sync', 'log', 'rhrs', 'pms', 'perf', 'reefer', 'oil', 'dg', 'fuel', 'notes'].includes(S.view)) ? 'page' : 'false'));
+  document.querySelectorAll('[data-v]').forEach(a => a.setAttribute('aria-current', a.dataset.v === S.view || (a.hasAttribute('data-more') && ['alerts', 'bwm', 'sync', 'log', 'rhrs', 'pms', 'perf', 'reefer', 'oil', 'dg', 'fuel', 'notes', 'lochart'].includes(S.view)) ? 'page' : 'false'));
   const c = counts(), n = c.over + c.inbox + c.stale; document.querySelectorAll('[data-cnt]').forEach(x => { x.hidden = !n; x.textContent = n });
   const st = db.status; $('#sfoot').textContent = { local: 'На устройстве', idle: 'Синхронизировано', syncing: 'Синхронизация…', offline: 'Офлайн', error: 'Ошибка синхронизации' }[st.state];
   $('#sdot').style.background = { local: 'var(--mute)', idle: 'var(--green)', syncing: 'var(--blue)', offline: 'var(--acc)', error: 'var(--red)' }[st.state];

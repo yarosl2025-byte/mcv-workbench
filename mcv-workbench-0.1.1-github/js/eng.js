@@ -2,7 +2,7 @@
 import * as db from './store.js';
 
 let C; // контекст из app.js: { S, render, toast, put, openTask, feed }
-export function init(ctx) { C = ctx; Object.assign(C.S, { pfTab: 'sc', isoM: 'dev', isoSel: '', oilG: '', oilEq: '', oilP: 'v40', dgE: 'AE1', dgM: 'pmax', dgSel: '', fuTab: 'sum', ntQ: '', ntCat: '', ntMoved: false, ntEdit: null, dict: false }) }
+export function init(ctx) { C = ctx; Object.assign(C.S, { pfTab: 'sc', isoM: 'dev', isoSel: '', oilG: '', oilEq: '', oilP: 'v40', dgE: 'AE1', dgM: 'pmax', dgSel: '', fuTab: 'sum', ntQ: '', ntCat: '', ntMoved: false, ntEdit: null, dict: false, lcTab: 'gr', lcG: '', lcQ: '' }) }
 
 const COL = ['#5BB8F5', '#3FB68B', '#F2A93B', '#F0616D', '#B49CF5', '#4FD1C5', '#E6EDF3', '#FF9F7A'];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -305,11 +305,12 @@ function dict(on) {
 /* =================== события =================== */
 export function onClick(a, el, e) {
   const S = C.S, k = el.dataset.k;
-  const map = { pftab: 'pfTab', isom: 'isoM', oilg: 'oilG', oilp: 'oilP', dge: 'dgE', dgm: 'dgM', futab: 'fuTab', ntcat: 'ntCat' };
+  const map = { pftab: 'pfTab', isom: 'isoM', oilg: 'oilG', oilp: 'oilP', dge: 'dgE', dgm: 'dgM', futab: 'fuTab', ntcat: 'ntCat', lctab: 'lcTab' };
   if (map[a]) { S[map[a]] = k; if (a === 'dge') S.dgSel = ''; C.render(); return true }
   if (a === 'isosel') { S.isoSel = S.isoSel === k ? '' : k; C.render(); if (S.isoSel) setTimeout(() => document.querySelector('[data-act=isosel][data-k=""]')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50); return true }
   if (a === 'dgsel') { S.dgSel = S.dgSel === k ? '' : k; C.render(); if (S.dgSel) setTimeout(() => document.querySelector('[data-act=dgsel][data-k=""]')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50); return true }
   if (a === 'oileq') { e.preventDefault(); S.oilEq = k; S.oilAll = false; const eq = db.get('oil/eq-' + k); if (eq && !(S.oilP in (eq.limits || {}))) S.oilP = 'v40'; C.render(); scrollTo(0, 0); return true }
+  if (a === 'lcg') { S.lcG = S.lcG === k ? '' : k; C.render(); return true }
   if (a === 'oilall') { S.oilAll = true; C.render(); return true }
   if (a === 'cntdel') { db.del('fuel/' + k).then(C.render); C.toast('Показание удалено'); return true }
   if (a === 'dict') { dict(!S.dict); return true }
@@ -325,6 +326,7 @@ export function onClick(a, el, e) {
 }
 export function onInput(e) {
   const S = C.S;
+  if (e.target.id === 'lcq') { S.lcQ = e.target.value; clearTimeout(S.lqt); S.lqt = setTimeout(() => { C.render(); const i = document.getElementById('lcq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length) } }, 250); return true }
   if (e.target.id === 'ntq') { S.ntQ = e.target.value; clearTimeout(S.nqt); S.nqt = setTimeout(C.render, 250); return true }
   if (e.target.form && e.target.form.id === 'notef') { const f = e.target.form; S.ntEdit = { ...(S.ntEdit || {}), text: f.text.value, eq: f.eq.value, cat: f.cat.value }; return true }
   return false;
@@ -348,4 +350,44 @@ export function onSubmit(id, f) {
   }
   return false;
 }
-export const VIEWS = { oil: oilView, dg: dgView, fuel: fuelView, notes: notesView };
+
+/* =================== Заправка систем (Lubricating Oil Chart) =================== */
+const LV = { exact: ['●', 'тот же сорт'], eq: ['○', 'эквивалент'], check: ['?', 'под вопросом'] };
+function lcStock(eqs) {
+  let ok = 0, ck = 0; const list = [];
+  for (const e of eqs || []) { const r = db.get('lube/' + e.pk); if (!r) continue; const v = (+r.drum || 0) * (+r.full || 0) + (+r.inuse || 0); list.push({ ...e, name: r.name, v, unit: r.cat === 'Смазки' ? 'кг' : 'л' }); if (e.lvl === 'check') ck += v; else ok += v }
+  return { ok, ck, list };
+}
+export function lochartView() {
+  const S = C.S, G = db.all('lochart').filter(x => x.id.startsWith('g-')).sort((a, b) => a.no - b.no), M = db.all('lochart').filter(x => x.id.startsWith('m-')).sort((a, b) => a.n - b.n);
+  const head = `<div><h1>Заправка систем</h1><div class="sub">Lubricating Oil Chart (Shell, S496): сколько масла в каждом механизме и танке · остаток на борту по инвентарю</div></div>`;
+  if (!G.length) return head + `<div class="banner">Данных чарта ещё нет. Загрузи файл mcv-workbench-lochart-2026-11-22.json: Синхронизация → «Загрузить из файла».</div>`;
+  const tb = tabs('lctab', S.lcTab, [['gr', 'По сортам'], ['mc', 'По механизмам'], ['sys', 'Масла по системам']]);
+  let body = '';
+  if (S.lcTab === 'gr') {
+    const rows = G.map(g => ({ g, st: lcStock(g.equiv) }));
+    const low = rows.filter(x => !x.g.bulk && x.g.fill > 0 && x.st.ok < x.g.fill && x.g.equiv?.length).length;
+    body = `<div class="banner">Фасованный запас сравнивается с заправкой системы. «Replacement Oil» в чарте — повторная заправка тем же объёмом, поэтому в «Заправку» не входит (в итогах самого чарта по Corena и холодильным маслам это сложено дважды).</div>
+    <section class="card"><div class="row between"><h2>Итог по сортам</h2><span class="sub">${G.length} сортов${low ? ' · запас меньше заправки: ' + low : ''}</span></div><div class="scroll mt"><table class="stack"><thead><tr><th>Сорт</th><th>Заправка</th><th>Самая большая система</th><th>На борту</th><th>%</th></tr></thead><tbody>
+    ${rows.map(({ g, st }) => { const u = g.unit === 'KG' ? 'кг' : 'л', pc = g.fill > 0 && g.equiv?.length ? Math.round(st.ok / g.fill * 100) : null, lowr = pc != null && pc < 100; const open = S.lcG === g.grade;
+      return `<tr class="click${lowr ? ' lowrow' : ''}" data-act="lcg" data-k="${esc(g.grade)}"><td data-l="Сорт"><b>${esc(g.grade)}</b>${g.bulk ? `<div class="small">${esc(g.bulk)}</div>` : ''}</td><td data-l="Заправка">${num(g.fill, Number.isInteger(g.fill) ? 0 : 1)} ${u}</td><td data-l="Макс.">${esc(g.largest_where)}: ${num(g.largest, Number.isInteger(g.largest) ? 0 : 1)}</td><td data-l="На борту">${g.equiv?.length ? `<b>${num(st.ok, 0)}</b> ${u}${st.ck ? ` <span class="small">+${num(st.ck, 0)}?</span>` : ''}` : '—'}</td><td data-l="%">${pc != null ? pc + '%' : ''}</td></tr>
+      ${open ? `<tr><td colspan="5"><div class="kv2"><div><b>Где применяется</b><ul>${g.points.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div><div><b>Что на борту</b>${st.list.length ? `<ul>${st.list.map(e => `<li>${LV[e.lvl][0]} ${esc(e.name)} — <b>${num(e.v, 0)}</b> ${e.unit} <span class="small">(${LV[e.lvl][1]})</span></li>`).join('')}</ul>` : '<div class="small">Фасованных позиций нет.</div>'}<div class="small">Бренды разные: эквивалент подобран по типу и вязкости, допуск проверяй по мануалу.</div>${g.note ? `<div class="small mt">${esc(g.note)}</div>` : ''}</div></div></td></tr>` : ''}`; }).join('')}
+    </tbody></table></div></section>`;
+  } else if (S.lcTab === 'mc') {
+    const q = S.lcQ.trim().toLowerCase(), f = M.filter(m => !q || (m.machine + ' ' + (m.sub || '') + ' ' + m.point + ' ' + m.grade + ' ' + m.no + ' ' + (m.maker || '')).toLowerCase().includes(q));
+    body = `<div class="row mt"><input id="lcq" class="search" type="search" placeholder="Поиск: механизм, сорт, точка" value="${esc(S.lcQ)}"></div>
+    <section class="card"><div class="row between"><h2>Механизмы и танки</h2><span class="sub">${f.length} из ${M.length} строк</span></div><div class="scroll mt"><table class="stack"><thead><tr><th>№</th><th>Механизм</th><th>Точка</th><th>Заправка</th><th>Сорт</th></tr></thead><tbody>
+    ${f.map(m => `<tr${m.repl ? ' style="opacity:.55"' : ''}><td data-l="№">${esc(m.no)}</td><td data-l="Механизм"><b>${esc(m.machine)}</b>${m.sub ? ' — ' + esc(m.sub) : ''}<div class="small">${esc(m.maker || '')}${m.qty ? ' · ×' + esc(m.qty) : ''}</div></td><td data-l="Точка">${esc(m.point)}${m.repl ? ' <span class="tag">повторная</span>' : ''}${m.remark ? `<div class="small">${esc(m.remark)}</div>` : ''}</td><td data-l="Заправка"><b>${esc(m.fill)}</b></td><td data-l="Сорт">${esc(m.grade)}</td></tr>`).join('')}
+    </tbody></table></div></section>`;
+  } else {
+    const grp = new Map();
+    for (const m of M) { const k = m.no + '|' + m.machine + (m.sub ? ' — ' + m.sub : ''); if (!grp.has(k)) grp.set(k, { no: m.no, name: m.machine + (m.sub ? ' — ' + m.sub : ''), L: 0, K: 0, big: [] }); const g = grp.get(k); if (m.repl || m.amount == null) continue; if (m.unit === 'L') g.L += m.amount; else g.K += m.amount; g.big.push(m) }
+    const arr = [...grp.values()], tl = arr.reduce((a, x) => a + x.L, 0), tk = arr.reduce((a, x) => a + x.K, 0);
+    body = `<div class="grid">${stat('Масла в системах', num(tl, 0), 'л')}${stat('Смазки', num(tk, 0), 'кг')}</div>
+    <section class="card"><h2>Сколько масла в каждой системе</h2><div class="note">Без «Replacement Oil». Данные чарта «на судно» по строке, не на один агрегат.</div><div class="scroll mt"><table class="stack"><thead><tr><th>№</th><th>Система</th><th>Масло, л</th><th>Смазка, кг</th><th>Основные ёмкости</th></tr></thead><tbody>
+    ${arr.map(x => `<tr><td data-l="№">${esc(x.no)}</td><td data-l="Система"><b>${esc(x.name)}</b></td><td data-l="Масло, л">${x.L ? '<b>' + num(x.L, x.L < 10 ? 1 : 0) + '</b>' : ''}</td><td data-l="Смазка, кг">${x.K ? num(x.K, x.K < 10 ? 2 : 0) : ''}</td><td data-l="Ёмкости" class="small">${x.big.sort((a, b) => b.amount - a.amount).slice(0, 3).map(m => esc(m.point) + ': ' + esc(m.fill) + ' · ' + esc(m.grade)).join('<br>')}</td></tr>`).join('')}
+    </tbody></table></div></section>`;
+  }
+  return head + tb + body;
+}
+export const VIEWS = { oil: oilView, dg: dgView, fuel: fuelView, notes: notesView, lochart: lochartView };
