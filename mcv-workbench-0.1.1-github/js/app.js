@@ -2,8 +2,9 @@ import * as db from './store.js';
 import * as CLO from './clo.js';
 import * as T from './tanks.js';
 import * as RR from './rhrs.js';
+import * as ENG from './eng.js';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const CATS = ['Док', 'PMS', 'ABS', 'Заказы', 'Офис', 'Текущие', 'IT', 'Logbook', 'Отчёты', 'Почта'];
 const ST = { inbox: 'Входящие', todo: 'Нужно сделать', doing: 'В работе', wait: 'Ждём', done: 'Готово' };
 const SLOTS = { '': 'Без времени', am: 'Утро', noon: 'До обеда', pm: 'После обеда', eve: 'Вечер' };
@@ -11,7 +12,7 @@ const REP = { '': 'Нет', daily: 'Каждый день', weekly: 'Кажду�
 const DOW = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MON = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 const MON1 = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-const VIEWS = ['today', 'plan', 'alerts', 'pms', 'rhrs', 'perf', 'tanks', 'lube', 'reefer', 'log', 'bwm', 'sync', 'more'];
+const VIEWS = ['today', 'plan', 'alerts', 'pms', 'rhrs', 'perf', 'tanks', 'lube', 'reefer', 'log', 'bwm', 'oil', 'dg', 'fuel', 'notes', 'sync', 'more'];
 
 const S = { tasks: new Map(), sources: [], feed: [], settings: {}, loaded: false,
   view: 'today', mode: 'week', off: 0, sel: null, cat: '', q: '', hideDone: true, mOff: 0, rolled: false, edit: null, undo: null,
@@ -36,6 +37,7 @@ const isOver = t => t.status !== 'done' && t.status !== 'inbox' && t.due && t.du
 const match = t => (!S.cat || t.cat === S.cat) && (!S.q || (t.title + ' ' + (t.note || '') + ' ' + (t.owner || '')).toLowerCase().includes(S.q.toLowerCase()));
 const limit = () => Number(S.settings.dayLimit) || 8;
 const uid = p => p + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+ENG.init({ S, render: () => render(), toast: (m, p) => toast(m, p), put: (a, b) => put(a, b), feed: t => feed(t), openTask: (title, note) => { openEd(null); const f = $('#edf'); if (f) { f.title.value = title; f.note.value = note } } });
 
 /* ---------- data ---------- */
 function load() {
@@ -536,12 +538,16 @@ const PERF = { load: [['pw', 'Мощность ГД, кВт', 0], ['rpm', 'Об�
   ae: [['ae1', 'ДГ1, кВт', 0], ['ae2', 'ДГ2, кВт', 0], ['ae3', 'ДГ3, кВт', 0], ['ae1h', 'ДГ1, ч', 0], ['ae2h', 'ДГ2, ч', 0], ['ae3h', 'ДГ3, ч', 0], ['whr', 'WHR, кВт', 0]] };
 const PERF_T = { load: 'Нагрузка', exh: 'Т выхлопа по цилиндрам, °C', pmax: 'Pmax, бар', pcomp: 'Pcomp, бар', tc: 'Турбокомпрессоры', air: 'Продувочный воздух и охладители', sys: 'Системы', ae: 'ДГ и WHR' };
 function vPerf() {
+  if (S.pfTab === 'iso' || S.pfTab === 'pmi') return `<div><h1>ME performance</h1><div class="sub">Отчёты Conakry ISO (Managing Performance) и PMI</div></div>${ENG.perfTabs()}${S.pfTab === 'iso' ? ENG.isoView() : ENG.pmiView()}`;
+  return vPerfSC();
+}
+function vPerfSC() {
   const meta = db.get('perf/meta'), days = db.all('perf').filter(d => /^day-/.test(d.id)).sort((a, b) => b.id.localeCompare(a.id));
-  if (!meta) return `<div><h1>ME performance</h1></div><div class="banner">Данных StarConnect ещё нет. Пришли мне выгрузку CAMS ICS (.xlsx) — разберу и загружу.</div>`;
+  if (!meta) return `<div><h1>ME performance</h1></div>${ENG.perfTabs()}<div class="banner">Данных StarConnect ещё нет. Пришли мне выгрузку CAMS ICS (.xlsx) — разберу и загружу.</div>`;
   const grp = S.pfG || 'exh', defs = PERF[grp], sea = days.filter(d => d.n > 0), L = meta.last || {};
   const cyl = ['exh', 'pmax', 'pcomp'].includes(grp);
   const dev = (d, k) => { if (!cyl) return null; const vals = defs.map(x => d[x[0]]).filter(v => v != null); const m = vals.reduce((a, b) => a + b, 0) / vals.length; return d[k] != null ? d[k] - m : null };
-  return `<div><h1>ME performance</h1><div class="sub">StarConnect / ACONIS · ${dlong(meta.from)} — ${dlong(meta.to)} · средние за сутки на ходу (ГД > 5000 кВт)</div></div>
+  return `<div><h1>ME performance</h1><div class="sub">StarConnect / ACONIS · ${dlong(meta.from)} — ${dlong(meta.to)} · средние за сутки на ходу (ГД > 5000 кВт)</div></div>${ENG.perfTabs()}
   <section class="card"><h2>Последние значения · ${L.t ? L.t.replace('T', ' ') : ''}</h2><div class="grid4 mt">${[['pw', 'Мощность ГД', 'кВт', 0], ['rpm', 'Обороты', 'об/мин', 1], ['fi', 'Индекс топлива', '%', 1], ['scavP', 'Pscav', 'бар', 2]].map(([k, l, u, d]) => out(l, L[k] != null ? num(L[k], d) : '—', u)).join('')}</div>
   <div class="note mt">Осадка ${L.dfwd ?? '—'} / ${L.daft ?? '—'} м · забортная вода ${L.sea ?? '—'} °C · МО ${L.er ?? '—'} °C · ДГ: ${[1, 2, 3].map(i => L['ae' + i] > 50 ? 'ДГ' + i + ' ' + num(L['ae' + i], 0) + ' кВт' : '').filter(Boolean).join(', ') || 'нет нагрузки'}</div></section>
   <div class="tabs" role="tablist">${Object.keys(PERF).map(k => `<button role="tab" data-act="pfg" data-g="${k}" aria-selected="${grp === k}">${PERF_T[k].split(',')[0]}</button>`).join('')}</div>
@@ -618,13 +624,17 @@ function vMore() {
   return `<div><h1>Ещё</h1><div class="sub">Остальные разделы</div></div><div class="list">
    ${it('#rhrs', 'Наработка ГД', 'Компоненты: клапаны, форсунки, поршни, втулки, HCU')}
    ${it('#pms', 'PMS Workboard', 'Работы из ShipManager, связь с планировщиком')}
-   ${it('#perf', 'ME performance', 'StarConnect / ACONIS: выхлоп, Pmax, ТК, воздух')}
+   ${it('#notes', 'Заметки', 'Голосовая диктовка, перенос в задачи и вопросы Claude')}
+   ${it('#perf', 'ME performance', 'StarConnect по суткам · отчёты ISO · PMI по цилиндрам')}
+   ${it('#oil', 'Анализы масла', 'VPS OCM: все агрегаты, история и тренды')}
+   ${it('#dg', 'ДГ performance', 'AE1–AE3: Doctor, ISO, формы, по цилиндрам')}
+   ${it('#fuel', 'Расход топлива', 'StarConnect расходомеры: сутки, SFOC по нагрузке, счётчики')}
    ${it('#log', 'Logbook', 'Scrape-down ГД · ORB Part I · Biofouling')}
    ${it('#reefer', 'Рефы', 'Расход энергии на рефконтейнеры')}
    ${it('#alerts', 'Уведомления', 'Просрочки, входящие, устаревшие источники', n || '')}
    ${it('#bwm', 'Bearing monitoring', 'Kongsberg BWM · месячные отчёты')}
    ${it('#sync', 'Синхронизация', 'Облако, резервная копия, источники, настройки')}</div>
-   <section class="card"><h2>Скоро</h2><div class="note mt">Заказы и заявки · Запчасти · Док 2026 и ABS · ACONIS · ME performance · Handover · Отчёты · Почта</div></section>`;
+   <section class="card"><h2>Скоро</h2><div class="note mt">Заказы и заявки · Каталог запчастей · Оборудование · История неисправностей · Док 2026 и ABS · Handover · Почта</div></section>`;
 }
 
 /* ---------- editor ---------- */
@@ -669,8 +679,8 @@ function mic(btn) {
 /* ---------- render ---------- */
 function render() {
   const m = $('#main'); const keep = focusSel(document.activeElement);
-  m.innerHTML = { plan: vPlan, alerts: vAlerts, tanks: vTanks, lube: vLube, log: vLog, rhrs: vRhrs, reefer: vReefer, pms: vPms, perf: vPerf, bwm: vBwm, sync: vSync, more: vMore }[S.view]?.() ?? vToday();
-  document.querySelectorAll('[data-v]').forEach(a => a.setAttribute('aria-current', a.dataset.v === S.view || (a.hasAttribute('data-more') && ['alerts', 'bwm', 'sync', 'log', 'rhrs', 'pms', 'perf', 'reefer'].includes(S.view)) ? 'page' : 'false'));
+  m.innerHTML = { plan: vPlan, alerts: vAlerts, tanks: vTanks, lube: vLube, log: vLog, rhrs: vRhrs, reefer: vReefer, pms: vPms, perf: vPerf, bwm: vBwm, sync: vSync, more: vMore, ...ENG.VIEWS }[S.view]?.() ?? vToday();
+  document.querySelectorAll('[data-v]').forEach(a => a.setAttribute('aria-current', a.dataset.v === S.view || (a.hasAttribute('data-more') && ['alerts', 'bwm', 'sync', 'log', 'rhrs', 'pms', 'perf', 'reefer', 'oil', 'dg', 'fuel', 'notes'].includes(S.view)) ? 'page' : 'false'));
   const c = counts(), n = c.over + c.inbox + c.stale; document.querySelectorAll('[data-cnt]').forEach(x => { x.hidden = !n; x.textContent = n });
   const st = db.status; $('#sfoot').textContent = { local: 'На устройстве', idle: 'Синхронизировано', syncing: 'Синхронизация…', offline: 'Офлайн', error: 'Ошибка синхронизации' }[st.state];
   $('#sdot').style.background = { local: 'var(--mute)', idle: 'var(--green)', syncing: 'var(--blue)', offline: 'var(--acc)', error: 'var(--red)' }[st.state];
@@ -698,6 +708,7 @@ addEventListener('resize', () => { if (S.view === 'plan') render() });
 /* ---------- events ---------- */
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return; const a = el.dataset.act;
+  if (ENG.onClick(a, el, e)) return;
   if (a === 'toggle') { e.stopPropagation(); toggle(el.closest('[data-id]').dataset.id); return }
   if (a === 'open') { openEd(el.dataset.id); return }
   if (a === 'mode') { S.mode = el.dataset.m; ls.set('mcv.mode', S.mode); render() }
@@ -762,6 +773,7 @@ document.addEventListener('click', e => {
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeEd() });
 addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) closeEd() });
 document.addEventListener('input', e => {
+  if (ENG.onInput(e)) return;
   if (e.target.id === 'q') { S.q = e.target.value; clearTimeout(S.qt); S.qt = setTimeout(render, 200) }
   const ds = e.target.dataset || {};
   if (ds.rf) { S.rfDraft[ds.rf] = e.target.value; clearTimeout(S.ct); S.ct = setTimeout(() => put('meta/reefer', { ...S.rfDraft }).then(render), 300) }
@@ -783,6 +795,7 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('submit', e => {
   e.preventDefault(); const id = e.target.id, f = new FormData(e.target);
+  if (ENG.onSubmit(id, f)) return;
   if (id === 'edf' && S.edit) { const t = { ...S.edit.t }, prev = S.edit.isNew ? { id: t.id, _new: true } : { ...S.tasks.get(t.id) };
     for (const k of ['title', 'cat', 'day', 'due', 'slot', 'status', 'waiting', 'owner', 'repeat', 'note']) t[k] = String(f.get(k) || '').trim();
     t.prio = +f.get('prio') || 3; if (!t.title) return; if (t.status === 'done' && !t.doneAt) t.doneAt = today();
