@@ -15,6 +15,10 @@ function req(r) { return new Promise((ok, no) => { r.onsuccess = () => ok(r.resu
 function store(name, mode = 'readonly') { return idb.transaction(name, mode).objectStore(name) }
 async function kvGet(k) { return req(store('kv').get(k)) }
 async function kvSet(k, v) { return req(store('kv', 'readwrite').put(v, k)) }
+// Task attachments: blobs live only on this device (kv store, key att/<id>); they are not synced or exported.
+export const fileSet = (id, blob) => kvSet('att/' + id, blob);
+export const fileGet = id => kvGet('att/' + id);
+export const fileDel = id => req(store('kv', 'readwrite').delete('att/' + id));
 
 export async function init() {
   idb = await new Promise((ok, no) => {

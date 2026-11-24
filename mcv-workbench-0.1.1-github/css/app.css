@@ -202,3 +202,26 @@ table.rh td,table.rh th{white-space:nowrap}
 .mtab tr.sel>*{background:#22303E}
 .mtab thead tr+tr th{top:28px}
 h3{font-size:14px;margin:14px 0 6px;color:var(--mute);font-weight:600}
+
+.ico{display:inline-block;flex:none;vertical-align:-.18em;pointer-events:none}
+:is(h1,h2,h3)>.ico{margin-inline-end:.42em;color:var(--accent-text,var(--acc))}
+:is(button,.tag,.ship-status,.ship-tabs a,.ship-alarm a,.more-menu a)>.ico{margin-inline-end:.38em}
+.fab>.ico,.mic>.ico,.bottom a>.ico{margin-inline-end:0}
+.fab>.ico{width:26px;height:26px}
+.more-menu .ico{align-self:center}
+.ship-alarm a{justify-content:flex-start}
+.ship-status .dot{display:none}
+@media(max-width:760px){
+ .strip button>.ico,.mc>.ico{display:block;margin:0 auto;width:12px;height:12px}
+ .ship-tabs a>.ico{width:12px;height:12px;margin-inline-end:2px}
+}
+
+/* task attachments */
+.att{border:1px solid var(--line,rgba(255,255,255,.14));border-radius:var(--r,10px);padding:10px 12px;margin:10px 0}
+.att legend{padding:0 6px;font-size:.85em;opacity:.8}
+.att-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line,rgba(255,255,255,.08))}
+.att-th{width:44px;height:44px;object-fit:cover;border-radius:6px;background:rgba(127,127,127,.2)}
+.att-name{flex:1;min-width:0;text-align:left;background:none;border:0;color:inherit;text-decoration:underline;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 0;font:inherit;cursor:pointer}
+.att-x{padding:4px 8px}
+.att-add{display:inline-flex;gap:6px;align-items:center;margin:10px 0 6px;cursor:pointer}
+.att-tag{display:inline-flex;gap:3px;align-items:center}

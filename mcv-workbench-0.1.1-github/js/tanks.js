@@ -1,3 +1,4 @@
+import { t as tr } from "./i18n.js";
 // Tank calculations — ported 1:1 from the vessel workbooks (see README_MCV_Tanks.md):
 //  • daily ER soundings book: FORECAST(x, OFFSET(vol, MATCH(x, sound, 1)-1, 0, 2), OFFSET(sound, …)) with x = cm/100
 //  • FO/DO/LO ROB workbook (30-10-2026 FO soundings.xlsx): trim-corrected calibration, cells M2..P9 of each tank sheet
@@ -22,7 +23,7 @@ export function dailyVolume(points, cm) {
 }
 
 // ROB workbook: rows = [[x, trim+2, +1, 0, -1, -2, -3, -4, -5], ...]
-function vlookup(rows, x, col) { const i = matchLE(rows, x, r => r[0]); if (i < 0) throw new Error('ниже таблицы'); return rows[i][col - 1] }
+function vlookup(rows, x, col) { const i = matchLE(rows, x, r => r[0]); if (i < 0) throw new Error(tr("s1195")); return rows[i][col - 1] }
 export function trimOf(fwd, aft) { const t = fwd - aft; return t <= -5 ? -5 : t > 2 ? 2 : t }
 export function calibVolume(rows, x, trim) {
   const M3 = trim, M2 = Math.floor(M3) + 1, M4 = Math.floor(M3);
@@ -60,7 +61,7 @@ export function computeROB(meta, cal, inp) {
       } else r.t = r.m3 * r.rho;
       const g = m.group === 'LO' ? 'LO' : m.k === 0.0008 ? 'DO' : 'HFO';
       r.sum = g; sum[g].m3 += r.m3; sum[g].t += r.t;
-    } catch (e) { r.error = 'Значение вне таблицы' }
+    } catch (e) { r.error = tr("s1196") }
     out.push(r);
   }
   return { trim, rows: out, sum };
@@ -73,7 +74,7 @@ export const ADDITIVES = { 'Castrol Cyltech 140': [140, .97], 'Chevron Taro Ultr
 const MDCL_DENS = { 40: .92, 70: .939, 100: .943, 140: .975 };
 export function lubeBOB(p) {
   const C8 = Math.round((Date.parse(p.forward_date) - Date.parse(p.delivery_date)) / 864e5), w = [];
-  if (C8 < 90) w.push(`До следующего основного порта меньше 90 дней (${C8})`);
+  if (C8 < 90) w.push(`${tr("s1197", {0: (C8)})}`);
   const a = p.additive, [C47, C11] = ADDITIVES[a.product], meso = p.meso;
   const C58 = +(meso.bn ?? 6), C12 = +(meso.density ?? .899), C19 = +a.target_bn;
   const C48 = (C19 - C58) / (C47 - C58), C60 = 1 - C48;
@@ -83,23 +84,23 @@ export function lubeBOB(p) {
   const K45 = C8 + C20, K46 = K45 * C49 / 30;
   const K48 = C17 * C48 > -G48 + K46 ? -K46 : C17 * C48 < -G48 ? 0 : -(C17 * C48) - G48, K49 = K46 + K48;
   const addOrder = Math.max(0, Math.ceil((G49 + K49 - a.stock_kg) / C11));
-  if (+a.stock_kg < G49) w.push('Присадка: ROB ниже страхового запаса');
-  if (a.tank_kg && addOrder > a.tank_kg * .95 - a.stock_kg) w.push('Присадка: заказ может не поместиться в танк (95 %)');
+  if (+a.stock_kg < G49) w.push(tr("s1198"));
+  if (a.tank_kg && addOrder > a.tank_kg * .95 - a.stock_kg) w.push(tr("s1199"));
   const C61 = blend * C60, G55 = +meso.safety_stock_kg, G57 = C61, G58 = G55 + G57;
   const G59 = C17 * C60 > G57 ? -G57 : -C17 * C60, G60 = G58 + G59;
   const K55 = C8, K56 = K55 * meso.consumption_kg_month / 30, K57 = K45 * C61 / 30, K58 = K56 + K57;
   const K59 = C17 * C60 > -G59 + K57 ? -K57 : C17 * C60 < -G59 ? 0 : -(C17 * C60) - G59, K60 = K58 + K59;
   const mesoOrder = G60 + K60 > meso.stock_kg ? (G60 + K60 - meso.stock_kg) / C12 : 0;
-  if (+meso.stock_kg < G60) w.push('MESO: ROB ниже страхового запаса');
-  if (meso.tank_kg && mesoOrder > meso.tank_kg * .95 - meso.stock_kg) w.push('MESO: заказ может не поместиться в танк (95 %)');
+  if (+meso.stock_kg < G60) w.push(tr("s1200"));
+  if (meso.tank_kg && mesoOrder > meso.tank_kg * .95 - meso.stock_kg) w.push(tr("s1201"));
   const t = p.tpeo, C13 = +(t.density ?? .913), G70 = +t.sump_kg + +t.consumption_kg_month, K68 = C8;
   const K70 = (+t.changeouts || 0) * t.sump_kg + t.consumption_kg_month / 30 * K68;
   const tpeoOrder = Math.max(0, Math.ceil((K70 + G70 - t.stock_kg) / C13));
-  if (+t.stock_kg < G70) w.push('TPEO (масло ДГ): ROB ниже страхового запаса');
-  if (t.tank_kg && tpeoOrder > t.tank_kg * .95 - t.stock_kg) w.push('TPEO: заказ может не поместиться в танк (95 %)');
+  if (+t.stock_kg < G70) w.push(tr("s1202"));
+  if (t.tank_kg && tpeoOrder > t.tank_kg * .95 - t.stock_kg) w.push(tr("s1203"));
   let mdcl = null;
   if (p.mdcl2 && p.mdcl2.bn) { const m = p.mdcl2, dens = MDCL_DENS[m.bn], cons = +m.consumption_kg_month;
-    mdcl = Math.max(0, Math.ceil((cons / 30 * C8 + cons - m.stock_kg) / dens)); if (+m.stock_kg < cons) w.push('MDCL: ROB ниже страхового запаса') }
-  return { days: C8, ratioAdd: C48, ratioMeso: C60, add: { safety: G49, forward: K49, order: addOrder, unit: a.product === 'GulfSea Cylcare 50140' ? 'кг' : 'л' },
+    mdcl = Math.max(0, Math.ceil((cons / 30 * C8 + cons - m.stock_kg) / dens)); if (+m.stock_kg < cons) w.push(tr("s1204")) }
+  return { days: C8, ratioAdd: C48, ratioMeso: C60, add: { safety: G49, forward: K49, order: addOrder, unit: a.product === 'GulfSea Cylcare 50140' ? tr("s201") : tr("s229") },
     meso: { safety: G60, forward: K60, order: mesoOrder }, tpeo: { safety: G70, forward: K70, order: tpeoOrder }, mdcl, warnings: w };
 }
