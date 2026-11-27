@@ -5,14 +5,16 @@ import * as T from './tanks.js';
 import * as RR from './rhrs.js';
 import * as ENG from './eng.js';
 import * as EQ from './equip.js';
+import * as FC from './fuelco.js';
 
 import { priorityLevels, levels, taskColor, urgencyBadge, urgencyChips, urgencyOf, urgencySettings } from './urgency.js';
 import { decorateIcons, ico } from './icons.js';
 import { isBiolab, markTiles, terminal, updateClock } from './biolab.js';
 import * as PREVIEW from './preview-views.js';
 import * as SHIP from './ship.js';
+import { downloadView, exportBar } from './exportx.js';
 
-const VERSION = '0.7.1';
+const VERSION = '0.8.1';
 const TASK_PRIORITIES = localized(() => ({ urgent: tr("s1"), medium: tr("s2"), later: tr("s3"), '': tr("s4") }));
 const PRIORITY_ORDER = Object.keys(TASK_PRIORITIES);
 const LEGACY_PRIORITY = { 1: 'medium', 2: 'medium', 3: 'later', 4: '' }; // 'urgent' is only ever set by hand
@@ -35,7 +37,7 @@ const REP = localized(() => ({ '': tr("s21"), daily: tr("s22"), weekly: tr("s23"
 const DOW = localized(() => ([tr("s25"), tr("s26"), tr("s27"), tr("s28"), tr("s29"), tr("s30"), tr("s31")]));
 const MON = localized(() => ([tr("s32"), tr("s33"), tr("s34"), tr("s35"), tr("s36"), tr("s37"), tr("s38"), tr("s39"), tr("s40"), tr("s41"), tr("s42"), tr("s43")]));
 const MON1 = localized(() => ([tr("s44"), tr("s45"), tr("s46"), tr("s47"), tr("s48"), tr("s49"), tr("s50"), tr("s51"), tr("s52"), tr("s53"), tr("s54"), tr("s55")]));
-const VIEWS = ['ship', 'today', 'plan', 'alerts', 'pms', 'rhrs', 'perf', 'tanks', 'lube', 'reefer', 'log', 'bwm', 'oil', 'dg', 'fuel', 'notes', 'lochart', 'equip', 'sync', 'more', 'urgency', 'icons', 'biolab'];
+const VIEWS = ['ship', 'today', 'plan', 'alerts', 'pms', 'rhrs', 'perf', 'tanks', 'lube', 'reefer', 'log', 'bwm', 'oil', 'dg', 'fuel', 'notes', 'lochart', 'fuelco', 'equip', 'sync', 'more', 'urgency', 'icons', 'biolab'];
 
 const S = { tasks: new Map(), sources: [], feed: [], settings: {}, loaded: false, taskPriority: null,
   view: 'today', urgency: '', mode: 'week', off: 0, sel: null, cat: '', q: '', hideDone: true, mOff: 0, rolled: false, edit: null, undo: null,
@@ -63,6 +65,7 @@ const uid = p => p + '-' + Date.now().toString(36) + Math.random().toString(36).
 PREVIEW.init({ tasks: live, esc });
 SHIP.init({ today, add, diff, pmsJobs, tasks: live });
 EQ.init({ S, render: () => render(), refresh: () => requestRender(), toast: (m, p) => toast(m, p), put: (a, b) => put(a, b) });
+FC.init({ S, render: () => render() });
 ENG.init({ S, render: () => render(), refresh: () => requestRender(), toast: (m, p) => toast(m, p), put: (a, b) => put(a, b), feed: t => feed(t), openTask: (title, note) => { openEd(null); const f = $('#edf'); if (f) { f.title.value = title; f.note.value = note } } });
 
 /* ---------- data ---------- */
@@ -435,7 +438,8 @@ function tMonth() {
 }
 function robInputs() { return S.robDraft || (S.robDraft = (() => { const last = db.all('rob').sort((a, b) => b.id.localeCompare(a.id))[0]; const t = {};
   if (last) for (const [k, v] of Object.entries(last.tanks || {})) t[k] = { density: v.density ?? '', temp: v.temp ?? '' };
-  return { date: today(), place: '', event: 'Quantity check', fwd: last ? last.fwd : '', aft: last ? last.aft : '', logHfo: '', logDo: '', tanks: t } })()) }
+  return { date: today(), place: '', event: 'Quantity check', fwd: '', aft: '', modes: {}, last: last ? { fwd: last.fwd, aft: last.aft, date: last.date } : null, logHfo: '', logDo: '', tanks: t } })()) }
+function modeOf(I, g, meta, f) { const m = meta.find(f); return (I.modes || {})[g] || (m ? m.kind : 'ullage') }
 function tRob() {
   const meta = foMeta(); if (!meta.length) return noCal();
   const I = robInputs(), ok = I.fwd !== '' && I.aft !== '', res = ok ? T.computeROB(meta, foCal(), I) : null, byKey = res ? Object.fromEntries(res.rows.map(r => [r.key, r])) : {};
@@ -445,13 +449,15 @@ function tRob() {
   return `<section class="card"><h2>${tr("s333")}</h2><div class="note">${tr("s334")}</div>
   <form class="fg3 mt" id="robh"><label class="f">${tr("s147")}<input type="date" name="date" value="${esc(I.date)}"></label><label class="f">${tr("s335")}<input name="place" value="${esc(I.place)}"></label>
   <label class="f">${tr("s336")}<select name="event">${['Quantity check', 'Before bunkering', 'After bunkering', 'Monthly ROB', 'Arrival', 'Departure'].map(e => `<option${e === I.event ? ' selected' : ''}>${e}</option>`).join('')}</select></label>
-  <label class="f">${tr("s337")}<input inputmode="decimal" type="number" step="any" name="fwd" value="${esc(I.fwd)}"></label><label class="f">${tr("s338")}<input inputmode="decimal" type="number" step="any" name="aft" value="${esc(I.aft)}"></label>
+  <label class="f">${tr("s337")}<input inputmode="decimal" type="number" step="any" name="fwd" value="${esc(I.fwd)}" placeholder="${esc(I.last ? I.last.fwd : '')}"></label><label class="f">${tr("s338")}<input inputmode="decimal" type="number" step="any" name="aft" value="${esc(I.aft)}" placeholder="${esc(I.last ? I.last.aft : '')}"></label>
+  ${ok ? '' : `<div class="banner amber" style="grid-column:1/-1">${tr('rob.draught', { 0: I.last ? I.last.fwd + ' / ' + I.last.aft + ' (' + I.last.date + ')' : '—' })}</div>`}
   <div class="f">${tr("s339")}<b style="font-size:20px;color:var(--ink)">${ok ? num(res.trim, 2) + tr("s319") : '—'}</b></div>
   <label class="f">${tr("s340")}<input inputmode="decimal" type="number" step="any" name="logHfo" value="${esc(I.logHfo)}"></label><label class="f">${tr("s341")}<input inputmode="decimal" type="number" step="any" name="logDo" value="${esc(I.logDo)}"></label></form></section>
   ${!ok ? ("<div class=\"banner\">" + tr("s320") + "</div>") : ''}
-  ${grp.map(([g, gl, f]) => `<section class="card"><h2>${gl}</h2><div class="scroll mt"><table class="rob"><thead><tr><th>${tr("s314")}</th><th>${tr("s322")}</th>${g !== 'LO' ? '<th>ρ15</th><th>t, °C</th>' : '<th>ρ</th>'}<th>${tr("s313")}</th><th>%</th><th>${tr("s186")}</th></tr></thead><tbody>
+  ${res && res.looksInverted ? `<div class="banner amber">${tr('rob.inverted')}</div>` : ''}
+  ${grp.map(([g, gl, f]) => `<section class="card"><h2>${gl}</h2>${g === 'LO' ? '' : `<div class="seg mt" role="group">${['ullage', 'sounding'].map(md => `<button type="button" aria-pressed="${modeOf(I, g, meta, f) === md}" data-act="robmode" data-g="${g}" data-m="${md}">${tr('rob.' + md)}</button>`).join('')}</div>`}<div class="scroll mt"><table class="rob"><thead><tr><th>${tr("s314")}</th><th>${tr("s322")}</th>${g !== 'LO' ? '<th>ρ15</th><th>t, °C</th>' : '<th>ρ</th>'}<th>${tr("s313")}</th><th>%</th><th>${tr("s186")}</th></tr></thead><tbody>
    ${meta.filter(f).map(m => { const d = I.tanks[m.key] || {}, r = byKey[m.key] || {}; return `<tr><th>${esc(m.key)}<small>${m.capacity ? num(m.capacity, 1) + tr("s303") : ''}</small></th>
-     <td>${fx(m.key, 'value', d.value, m.kind === 'volume' ? tr("s313") : tr("s302"))}</td><td>${fx(m.key, 'density', d.density, m.density)}</td>${g !== 'LO' ? `<td>${fx(m.key, 'temp', d.temp, m.temp)}</td>` : ''}
+     <td>${fx(m.key, 'value', d.value, m.kind === 'volume' ? tr("s313") : tr('rob.' + modeOf(I, g, meta, f)) + ', ' + tr("s302"))}</td><td>${fx(m.key, 'density', d.density, m.density)}</td>${g !== 'LO' ? `<td>${fx(m.key, 'temp', d.temp, m.temp)}</td>` : ''}
      <td>${r.error ? ("<span class=\"bad\">" + tr("s321") + "</span>") : r.m3 != null ? num(r.m3, 2) : ''}</td><td class="${r.pct > m.maxpct ? 'bad' : ''}">${r.pct != null ? num(r.pct, 1) : ''}</td><td>${r.t != null ? num(r.t, 2) : ''}</td></tr>` }).join('')}</tbody></table></div></section>`).join('')}
   ${res ? `<div class="grid4" style="grid-template-columns:repeat(3,minmax(0,1fr))">${[['HFO', tr("s323"), I.logHfo], ['DO', tr("s324"), I.logDo], ['LO', tr("s325"), '']].map(([k, l, lg]) => `<div class="stat"><span class="lbl">${l}</span><b style="color:var(--acc)">${tr("s327", {1: (num(res.sum[k].t, 2))})}</b><span class="lbl">${tr("s328", {2: (num(res.sum[k].m3, 1)), 3: (lg !== '' && lg != null ? `${tr("s326", {0: (num(+lg, 1)), 1: (num(res.sum[k].t - lg, 2))})}` : '')})}</span></div>`).join('')}</div>
   <div class="savebar"><span class="note">${tr("s329")}</span><button class="btn pri" data-act="robsave">${tr("s330")}</button></div>` : ''}
@@ -725,6 +731,7 @@ function vMore() {
    ${it('#notes', tr("s575"), tr("s576"))}
    ${it('#perf', 'ME performance', tr("s577"))}
    ${it('#equip', tr("s578"), tr("s579"))}
+   ${it('#fuelco', language() === 'ru' ? 'Переход на другое топливо' : 'Fuel changeover', language() === 'ru' ? 'Время перехода HFO → LSFO' : 'HFO → LSFO changeover time')}
    ${it('#lochart', tr("s580"), tr("s581"))}
    ${it('#oil', tr("s582"), tr("s583"))}
    ${it('#dg', tr("s584"), tr("s585"))}
@@ -876,9 +883,10 @@ function render(keepEdits = false) {
     ? [active.selectionStart, active.selectionEnd, active.selectionDirection, active.scrollTop, active.scrollLeft] : [];
   const drafts = keepEdits ? [...m.querySelectorAll('input,textarea,select')]
     .filter(el => uncommitted.has(el)).map(el => [focusSel(el), el.value, el.checked]).filter(([key]) => key) : [];
-  m.innerHTML = { plan: vPlan, alerts: vAlerts, tanks: vTanks, lube: vLube, log: vLog, rhrs: vRhrs, reefer: vReefer, pms: vPms, perf: vPerf, bwm: vBwm, sync: vSync, more: vMore, ...ENG.VIEWS, ...EQ.VIEWS, ...SHIP.VIEWS, ...PREVIEW.VIEWS }[S.view]?.() ?? vToday();
+  m.innerHTML = { plan: vPlan, alerts: vAlerts, tanks: vTanks, lube: vLube, log: vLog, rhrs: vRhrs, reefer: vReefer, pms: vPms, perf: vPerf, bwm: vBwm, sync: vSync, more: vMore, ...ENG.VIEWS, ...EQ.VIEWS, ...FC.VIEWS, ...SHIP.VIEWS, ...PREVIEW.VIEWS }[S.view]?.() ?? vToday();
+  m.insertAdjacentHTML('afterbegin', exportBar(S.view, m, tr('xl.btn')));
   decorateIcons(m, S.view);
-  document.querySelectorAll('[data-v]').forEach(a => a.setAttribute('aria-current', a.dataset.v === S.view || (a.hasAttribute('data-more') && ['alerts', 'bwm', 'sync', 'log', 'rhrs', 'pms', 'perf', 'reefer', 'oil', 'dg', 'fuel', 'notes', 'lochart', 'equip'].includes(S.view)) ? 'page' : 'false'));
+  document.querySelectorAll('[data-v]').forEach(a => a.setAttribute('aria-current', a.dataset.v === S.view || (a.hasAttribute('data-more') && ['alerts', 'bwm', 'sync', 'log', 'rhrs', 'pms', 'perf', 'reefer', 'oil', 'dg', 'fuel', 'notes', 'lochart', 'fuelco', 'equip'].includes(S.view)) ? 'page' : 'false'));
   const c = counts(), n = c.over + c.inbox + c.stale; document.querySelectorAll('[data-cnt]').forEach(x => { x.hidden = !n; x.textContent = n });
   const st = db.status;
   if (isBiolab()) {
@@ -947,7 +955,7 @@ matchMedia('(max-width:760px)').addEventListener('change', () => { if (S.view ==
 /* ---------- events ---------- */
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return; const a = el.dataset.act;
-  if (ENG.onClick(a, el, e) || EQ.onClick(a, el, e)) return;
+  if (ENG.onClick(a, el, e) || EQ.onClick(a, el, e) || FC.onClick(a, el, e)) return;
   if (a === 'language') {
     const saved = setLanguage(el.dataset.k);
     load();
@@ -1029,13 +1037,15 @@ document.addEventListener('click', e => {
   if (a === 'tmo') { S.tmOff += +el.dataset.d; render() }
   if (a === 'tmu') { S.tmUnit = el.dataset.u; render() }
   if (a === 'tmcsv') monthCSV();
+  if (a === 'xlsx') { if (!downloadView(S.view, $('#main'))) toast(tr('xl.none')) }
   if (a === 'ssave') { const draft = S.sDraft, { _date, ...raw } = draft, vals = { ...raw }; for (const k in vals) if (vals[k] === '') delete vals[k]; else vals[k] = +vals[k];
     put('soundings/' + _date, { values: vals, by: orig("s58"), at: new Date().toISOString() }).then(() => { if (S.sDraft === draft && !soundingsDirty(draft, { values: raw })) S.sDraft = { _date, ...vals }; requestRender(); toast(tr("s646") + dlong(_date) + tr("s647")) }) }
+  if (a === 'robmode') { const I = robInputs(); (I.modes ||= {})[el.dataset.g] = el.dataset.m; render(); return }
   if (a === 'robsave') { const I = robInputs(), r = T.computeROB(foMeta(), foCal(), I), id = I.date + '-' + Date.now().toString(36);
     const tanks = {}; for (const [k, v] of Object.entries(I.tanks)) if (v && (v.value !== '' && v.value != null || v.density !== '' || v.temp !== '')) tanks[k] = v;
-    put('rob/' + id, { date: I.date, place: I.place, event: I.event, fwd: I.fwd, aft: I.aft, logHfo: I.logHfo, logDo: I.logDo, tanks, trim: r.trim, sum: r.sum }).then(() => { requestRender(); toast(tr("s648")) });
+    put('rob/' + id, { date: I.date, place: I.place, event: I.event, fwd: I.fwd, aft: I.aft, logHfo: I.logHfo, logDo: I.logDo, modes: I.modes, tanks, trim: r.trim, sum: r.sum }).then(() => { requestRender(); toast(tr("s648")) });
     feed(`${tr("s649", {0: (I.event), 1: (num(r.sum.HFO.t, 1)), 2: (num(r.sum.DO.t, 1))})}`) }
-  if (a === 'robopen') { const h = db.get('rob/' + el.dataset.rid); if (h) { S.robDraft = { date: h.date, place: h.place || '', event: h.event || 'Quantity check', fwd: h.fwd, aft: h.aft, logHfo: h.logHfo || '', logDo: h.logDo || '', tanks: JSON.parse(JSON.stringify(h.tanks || {})) }; render(); scrollTo(0, 0); toast(tr("s650") + dlong(h.date) + tr("s651")) } }
+  if (a === 'robopen') { const h = db.get('rob/' + el.dataset.rid); if (h) { S.robDraft = { date: h.date, place: h.place || '', event: h.event || 'Quantity check', fwd: h.fwd, aft: h.aft, logHfo: h.logHfo || '', logDo: h.logDo || '', modes: { ...(h.modes || {}) }, tanks: JSON.parse(JSON.stringify(h.tanks || {})) }; render(); scrollTo(0, 0); toast(tr("s650") + dlong(h.date) + tr("s651")) } }
   if (a === 'rowadd') openRow(el.dataset.col);
   if (a === 'rowedit') openRow(el.dataset.col, el.dataset.rid);
   if (a === 'rowdel') { if (el.dataset.sure) { const p = S.edit.col + '/' + S.edit.rid, body = db.get(p); closeEd(); db.del(p).then(() => { requestRender(); toast(tr("s634"), { _row: p, body }) }) } else { el.dataset.sure = '1'; el.textContent = tr("s635") } }
@@ -1096,7 +1106,7 @@ document.addEventListener('input', e => {
     $('#palette-custom .palette-samples').children[Number(colorIndex)].style.setProperty('--u-color', e.target.value);
     return;
   }
-  if (ENG.onInput(e) || EQ.onInput(e)) return;
+  if (ENG.onInput(e) || EQ.onInput(e) || FC.onInput(e)) return;
   if (updateInput(e.target)) return;
   const ds = e.target.dataset || {};
   if (ds.sc) { const D = S.scDraft; if (ds.i != null) D[ds.sc][+ds.i] = e.target.value; else D[ds.sc] = e.target.value }
@@ -1104,7 +1114,7 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   const field = e.target;
-  if (ENG.onChange?.(e) || EQ.onChange?.(e) || updateInput(field)) { requestRender(field); return }
+  if (ENG.onChange?.(e) || EQ.onChange?.(e) || FC.onChange(e) || updateInput(field)) { requestRender(field); return }
   const { id, value } = field;
   if (id === 'pmresp') S.pmResp = value;
   else if (id === 'bwfrom') S.bwFrom = value;
@@ -1119,7 +1129,7 @@ document.addEventListener('change', e => {
 document.addEventListener('submit', e => {
   e.preventDefault(); const id = e.target.id, f = new FormData(e.target);
   for (const field of e.target.elements) uncommitted.delete(field);
-  if (ENG.onSubmit(id, f) || EQ.onSubmit(id, f)) return;
+  if (ENG.onSubmit(id, f) || EQ.onSubmit(id, f) || FC.onSubmit(id, f)) return;
   if (id === 'edf' && S.edit) { const t = { ...S.edit.t }, prev = S.edit.isNew ? { id: t.id, _new: true } : { ...S.tasks.get(t.id) };
     for (const k of ['title', 'cat', 'day', 'due', 'slot', 'status', 'waiting', 'owner', 'repeat', 'note']) t[k] = String(f.get(k) || '').trim();
     if (f.has('reply')) t.reply = true; else delete t.reply;

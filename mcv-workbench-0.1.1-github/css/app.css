@@ -225,3 +225,6 @@ h3{font-size:14px;margin:14px 0 6px;color:var(--mute);font-weight:600}
 .att-x{padding:4px 8px}
 .att-add{display:inline-flex;gap:6px;align-items:center;margin:10px 0 6px;cursor:pointer}
 .att-tag{display:inline-flex;gap:3px;align-items:center}
+
+.xl-bar{display:flex;justify-content:flex-end;margin:0 0 8px}
+.xl-bar .btn{display:inline-flex;gap:6px;align-items:center}

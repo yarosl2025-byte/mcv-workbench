@@ -365,12 +365,22 @@ html .urgency-chip .ico { margin:0; color:color-mix(in srgb,var(--u-color) 48%,v
   background-color:color-mix(in srgb,var(--u-color) 21%,var(--p2));
   border:1px solid color-mix(in srgb,var(--u-color) 55%,var(--line));
 }
-[data-urgency="crit"] .urgency-badge { animation:urgency-pulse 3.2s ease-in-out infinite }
-@keyframes urgency-pulse {
-  0%,100% { box-shadow:0 0 0 0 transparent }
-  50% { box-shadow:0 0 0 3px color-mix(in srgb,var(--u-color) 34%,transparent) }
+/* Urgent (red, set by hand) blinks. Reduced-motion users get a steady strong red frame instead. */
+[data-urgency="crit"].task-card, [data-urgency="crit"].lg, [data-urgency="crit"].t { animation:urgent-blink 1.2s ease-in-out infinite }
+[data-urgency="crit"] .urgency-badge { animation:urgent-badge 1.2s ease-in-out infinite }
+[data-urgency="crit"] .priority-dot { animation:urgent-badge 1.2s ease-in-out infinite }
+@keyframes urgent-blink {
+  0%,100% { box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--u-crit) 70%,transparent), 0 0 0 0 transparent; background-color:color-mix(in srgb,var(--u-crit) 6%,var(--p2)) }
+  50% { box-shadow:inset 0 0 0 2px var(--u-crit), 0 0 16px 2px color-mix(in srgb,var(--u-crit) 60%,transparent); background-color:color-mix(in srgb,var(--u-crit) 30%,var(--p2)) }
 }
-@media(prefers-reduced-motion:reduce) { [data-urgency="crit"] .urgency-badge { animation:none } }
+@keyframes urgent-badge {
+  0%,100% { opacity:1; background-color:color-mix(in srgb,var(--u-crit) 25%,var(--p2)) }
+  50% { opacity:.35; background-color:var(--u-crit) }
+}
+@media(prefers-reduced-motion:reduce) {
+  [data-urgency="crit"].task-card, [data-urgency="crit"].lg, [data-urgency="crit"].t { animation:none; box-shadow:inset 0 0 0 2px var(--u-crit) }
+  [data-urgency="crit"] .urgency-badge, [data-urgency="crit"] .priority-dot { animation:none }
+}
 .task-card { align-items:center; gap:6px }
 .task-card .tb { overflow-wrap:anywhere }
 .task-reply {

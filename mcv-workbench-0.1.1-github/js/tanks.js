@@ -52,7 +52,14 @@ export function computeROB(meta, cal, inp) {
     if (d.ignore || d.value === '' || d.value == null) { r.empty = true; out.push(r); continue }
     try {
       r.value = +d.value;
-      r.m3 = m.kind === 'volume' ? +d.value : calibVolume(cal[m.sheet], +d.value, trim);
+      let x = +d.value;
+      const g0 = m.group === 'LO' ? 'LO' : m.k === 0.0008 ? 'DO' : 'HFO', mode = (inp.modes || {})[g0] || m.kind;
+      if (m.kind !== 'volume' && mode !== m.kind) {            // value typed in the other convention: depth = last row of the calibration table
+        const rows = cal[m.sheet], depth = rows[rows.length - 1][0];
+        if (x > depth) throw new Error('over depth');
+        x = depth - x;
+      }
+      r.m3 = m.kind === 'volume' ? +d.value : calibVolume(cal[m.sheet], x, trim);
       r.rho = d.density !== '' && d.density != null ? +d.density : m.density;
       r.pct = m.capacity ? r.m3 / m.capacity * 100 : null;
       if (m.group === 'HFO') {
@@ -64,7 +71,8 @@ export function computeROB(meta, cal, inp) {
     } catch (e) { r.error = tr("s1196") }
     out.push(r);
   }
-  return { trim, rows: out, sum };
+  const over = out.filter(r => r.pct != null && r.maxpct && r.pct > r.maxpct + 0.5).length;
+  return { trim, rows: out, sum, looksInverted: over >= 2 };
 }
 
 // Lube uplift — MLFMT "InventoryMgt Calc-Guidelines 03-08-2026", tab BOB-Vessels (exact replica)
